@@ -1,6 +1,6 @@
 {
   "name": "tailbrowser",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Let AI agents control your real Chrome over your tailnet — scoped to pages you allow or the whole browser",
   "type": "module",
   "bin": { "tailbrowser": "./agent/tailbrowser.mjs" },
