@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { width: 340px; font: 13px/1.45 system-ui, sans-serif; margin: 10px; color: #111; }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    .row { display: flex; gap: 6px; margin: 6px 0; align-items: center; }
+    label { flex: 0 0 92px; }
+    input[type=text] { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; }
+    select { padding: 4px; }
+    .muted { color: #666; font-size: 11.5px; }
+    .ok { color: #1a9f47; font-weight: 600; }
+    .bad { color: #c0392b; font-weight: 600; }
+    #tabs { margin: 8px 0; max-height: 140px; overflow: auto; }
+    .tab { display: flex; gap: 6px; align-items: center; padding: 3px 0; border-bottom: 1px solid #eee; }
+    .tab .u { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    button { padding: 4px 8px; cursor: pointer; }
+    #save { background: #1a73e8; color: #fff; border: 0; border-radius: 4px; padding: 6px 12px; }
+    #revoke { background: #c0392b; color: #fff; border: 0; border-radius: 4px; padding: 6px 12px; width: 100%; margin-top: 8px; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <h1>tailbrowser</h1>
+  <div id="status" class="muted">checking…</div>
+  <div class="row"><label>Relay</label><input type="text" id="relay"></div>
+  <div class="row"><label>Token</label><input type="text" id="token" placeholder="optional — leave blank if relay runs tokenless"></div>
+  <div class="row"><label>Scope</label>
+    <select id="scope">
+      <option value="tab">Tabs I pick</option>
+      <option value="allowlist">URL allowlist</option>
+      <option value="full">Entire browser</option>
+    </select>
+  </div>
+  <div id="allowRow" class="row hidden"><label>Allowlist</label><input type="text" id="allowlist" placeholder="https://example.com/*"></div>
+  <div class="row"><button id="save">Save &amp; connect</button><button id="discover">Discover</button><button id="optin">Opt in this tab</button></div>
+  <div class="muted">Attached tabs:</div>
+  <div id="tabs"></div>
+  <button id="revoke">Disconnect agent (revoke)</button>
+  <script src="popup.js"></script>
+</body>
+</html>
