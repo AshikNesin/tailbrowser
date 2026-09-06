@@ -1,6 +1,24 @@
 // tailbrowser M0 — extension service worker
 // Connects to the relay over WS, pipes CDP between relay and chrome.debugger.
 // M0 scope = tab mode: only tabs the user opts in via the popup (or icon click).
+//
+// LIFETIME MODEL (why this file looks the way it does):
+// Chrome terminates MV3 service workers ~30s after their last event. Since
+// Chrome 116, WebSocket traffic does NOT reset that timer. So a background
+// worker holding "the relay connection" silently dies when Chrome is not
+// focused — exactly the bug this design fixes. Keep-alive is layered:
+//
+//   1. offscreen keepalive port (20s pings) — primary; resets the idle timer
+//      even with Chrome fully in the background
+//   2. chrome.alarms (every 30s)            — wakes the worker if it died
+//      anyway (memory pressure, crash, manual stop): on wake it reconnects
+//      the WS if needed
+//   3. app-level WS ping/pong (20s ping / 75s pong deadline) — detects
+//      half-open TCP (sleep/wake, network change) and forces a clean reconnect
+//
+// Everything that must survive a cold restart is persisted:
+//   - opts, optedIn tabs    -> chrome.storage.local
+//   - runtime liveness data -> chrome.storage.session (cleared on browser restart)
 
 const DEFAULT_RELAY = 'ws://localhost:8787';
 
@@ -10,6 +28,18 @@ let connected = false;
 let opts = null; // { relay, token, scopeMode, allowlist }
 let optedIn = new Set(); // tabIds the user opted in
 let attached = new Map(); // tabId -> { sessionId, targetId }
+
+// ---- keepalive / connection health ----
+const KEEPALIVE_PORT_NAME = 'tb-keepalive';
+const PING_INTERVAL_MS = 20_000;
+const PONG_DEADLINE_MS = 75_000;
+const ALARM_KEEPALIVE = 'tb-keepalive-alarm';
+
+let keepalivePort = null; // port from the offscreen document
+let lastPongAt = 0; // last time we heard anything from the relay
+let reconnectTimer = 0;
+let retryDelay = 2000; // reconnect backoff, reset on successful connect
+let booted = false; // guards against re-entrant boot() via alarm firing early
 
 // ---- persistence ----
 
@@ -22,6 +52,37 @@ async function loadOpts() {
 
 async function saveOpts() {
   await chrome.storage.local.set({ tbOpts: opts });
+}
+
+// optedIn tab ids survive worker restarts via storage.local (tab ids are stable
+// for the lifetime of the browser process)
+async function persistOptedIn() {
+  await chrome.storage.local.set({ tbOptedIn: [...optedIn] });
+}
+
+async function restoreOptedIn() {
+  const { tbOptedIn } = await chrome.storage.local.get('tbOptedIn');
+  optedIn = new Set(tbOptedIn || []);
+}
+
+// per-run liveness (attached target ids) -> storage.session, so a restarted
+// worker re-advertises the same targets without re-attaching (debugger
+// attachments outlive worker restarts)
+async function persistRuntimeState() {
+  const targets = [];
+  for (const [tabId, info] of attached) targets.push({ tabId, targetId: info.targetId });
+  await chrome.storage.session.set({ tbRuntime: { targets, at: Date.now() } });
+}
+
+async function restoreRuntimeState() {
+  try {
+    const { tbRuntime } = await chrome.storage.session.get('tbRuntime');
+    if (tbRuntime && tbRuntime.targets) {
+      for (const t of tbRuntime.targets) {
+        if (t.tabId != null && !attached.has(t.tabId)) attached.set(t.tabId, { sessionId: 'tb-' + t.tabId, targetId: t.targetId });
+      }
+    }
+  } catch {}
 }
 
 // ---- badge ----
@@ -57,6 +118,88 @@ function matchAllowlist(url) {
 function globMatch(pat, s) {
   const re = new RegExp('^' + pat.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
   return re.test(s);
+}
+
+// ---- keepalive: offscreen document ----
+
+// The offscreen document holds a runtime.Port to this worker and posts a
+// message every 20s. Every message received on the port resets the worker's
+// idle timer, so the worker never goes idle while the port lives — even when
+// Chrome itself is in the background. Offscreen documents are never throttled
+// by Chrome, which is exactly why they can do this job.
+async function ensureOffscreen() {
+  try {
+    if (await chrome.offscreen.hasDocument()) return;
+    await chrome.offscreen.createDocument({
+      url: 'offscreen.html',
+      reasons: ['WORKERS'], // 'WORKERS' is the accepted reason for long-lived background scripting
+      justification: 'Holds a keepalive port so the service worker (and its relay WebSocket) stays alive while Chrome is in the background',
+    });
+  } catch (e) {
+    log('offscreen create failed', String((e && e.message) || e));
+  }
+}
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== KEEPALIVE_PORT_NAME) return;
+  keepalivePort = port;
+  port.onMessage.addListener((msg) => {
+    // the message itself is the point — receiving it resets the idle timer
+    if (msg && msg.t === 'ping') {
+      try { port.postMessage({ t: 'pong' }); } catch {}
+    }
+  });
+  port.onDisconnect.addListener(() => {
+    if (keepalivePort === port) keepalivePort = null;
+    // offscreen doc went away (usually because this worker restarted) — recreate
+    setTimeout(ensureOffscreen, 1000);
+  });
+});
+
+// ---- keepalive: alarms fallback ----
+
+// If the worker is terminated anyway (memory pressure, crash, manual stop),
+// the periodic alarm fires, Chrome restarts the worker, and the alarm handler
+// verifies the connection chain and reconnects if needed. This is the safety
+// net under the offscreen port.
+async function ensureAlarm() {
+  try {
+    await chrome.alarms.clear(ALARM_KEEPALIVE);
+    await chrome.alarms.create(ALARM_KEEPALIVE, { delayInMinutes: 0.5, periodInMinutes: 0.5 });
+  } catch (e) {
+    log('alarm create failed', String((e && e.message) || e));
+  }
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== ALARM_KEEPALIVE) return;
+  if (!booted) { boot().catch((e) => log('boot (alarm) failed', e)); return; }
+  // worker just woke (or was alive): make sure the keepalive chain + WS are healthy
+  if (!keepalivePort) ensureOffscreen(); // no await — fire and forget
+  ensureConnection(); // healthy connection => no-op
+});
+
+// ---- connection supervision ----
+
+// Idempotent health check, called from: alarm ticks, port connects, reconnect
+// timers. If connected and the relay answered recently, do nothing. If the
+// relay went silent past the pong deadline, the socket is half-open (sleep /
+// wake, network switch) — recycle it and redial. If not connected but
+// configured, dial.
+async function ensureConnection() {
+  clearTimeout(reconnectTimer);
+  if (ws && connected) {
+    const staleFor = Date.now() - lastPongAt;
+    if (staleFor > PONG_DEADLINE_MS) {
+      log(`relay silent ${Math.round(staleFor / 1000)}s — half-open socket, recycling`);
+      try { ws.close(); } catch {} // onclose handles the redial
+      return;
+    }
+    return; // healthy
+  }
+  if (!ws && opts && opts.configured) {
+    reconnectTimer = setTimeout(() => connect(), 0);
+  }
 }
 
 // ---- relay discovery (tailnet scan) ----
@@ -102,14 +245,18 @@ function connect() {
     return;
   }
   if (ws) { try { ws.close(); } catch {} }
+  clearTimeout(reconnectTimer);
   log('connecting', opts.relay);
   const sock = new WebSocket(`${opts.relay}/extension?token=${encodeURIComponent(opts.token)}&v=1`);
   ws = sock;
   sock.onopen = () => {
+    if (ws !== sock) return; // stale socket won the race
     connected = true;
+    retryDelay = 2000;
+    lastPongAt = Date.now();
     log('connected to relay');
     refreshBadge();
-    heartbeat();
+    startPingLoop(sock);
     send({ t: 'scope', mode: opts.scopeMode, allowlist: opts.allowlist });
     // advertise currently-attached targets (post-resume)
     for (const [tabId, info] of attached) sendAttached(tabId, info);
@@ -117,21 +264,32 @@ function connect() {
     if (opts.scopeMode === 'full') autoAttachAll();
   };
   sock.onclose = () => {
+    if (ws !== sock) return; // a newer socket has taken over
     connected = false;
     ws = null;
     refreshBadge();
-    if (opts.configured) setTimeout(connect, 2000); // retry while configured
+    // retry while configured, with mild backoff (2s -> 30s) so a dead relay
+    // doesn't spin the CPU; alarms still tick as a backstop
+    if (opts.configured) {
+      reconnectTimer = setTimeout(connect, retryDelay);
+      retryDelay = Math.min(retryDelay * 1.7, 30_000);
+    }
   };
   sock.onerror = () => { try { sock.close(); } catch {} };
-  sock.onmessage = (ev) => { handleMessage(String(ev.data)).catch(e => log('handle error', e)); };
+  sock.onmessage = (ev) => {
+    lastPongAt = Date.now(); // any traffic proves liveness
+    handleMessage(String(ev.data)).catch(e => log('handle error', e));
+  };
 }
 
-function heartbeat() {
-  if (ws !== sock_ref()) return;
-  if (ws && ws.readyState === 1) ws.send('ping');
-  setTimeout(heartbeat, 20000);
+// WS-level ping loop bound to a specific socket instance; dies with the socket.
+function startPingLoop(sock) {
+  setTimeout(function ping() {
+    if (ws !== sock || sock.readyState !== 1) return; // socket replaced/closed
+    sock.send('ping');
+    setTimeout(ping, PING_INTERVAL_MS);
+  }, PING_INTERVAL_MS);
 }
-function sock_ref() { return ws; }
 
 function send(msg) {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
@@ -183,6 +341,14 @@ async function handleMessage(raw) {
       }
       return;
     }
+    case 'closeTab': {
+      const tabId = findTabByTarget(msg.targetId);
+      if (tabId == null) return send({ t: 'ok', id: msg.id, error: 'TB_SCOPE: unknown target' });
+      if (opts.scopeMode !== 'full') return send({ t: 'ok', id: msg.id, error: 'TB_SCOPE: closing tabs requires full-browser mode' });
+      try { await chrome.tabs.remove(tabId); send({ t: 'ok', id: msg.id }); }
+      catch (e) { send({ t: 'ok', id: msg.id, error: String(e && e.message || e) }); }
+      return;
+    }
     case 'detach': {
       const { tabId } = msg;
       try { await detachTab(Number(tabId), 'relay'); } catch {}
@@ -228,6 +394,7 @@ async function attachTab(tabId, { createdByAgent = false } = {}) {
   } catch (e) { log('getTargets failed', e); }
   const info = { sessionId: 'tb-' + tabId, targetId };
   attached.set(tabId, info);
+  persistRuntimeState();
   refreshBadge();
   sendAttached(tabId, info);
   return info;
@@ -237,6 +404,7 @@ async function detachTab(tabId, reason) {
   const info = attached.get(tabId);
   if (!info) return;
   attached.delete(tabId);
+  persistRuntimeState();
   try { await chrome.debugger.detach({ tabId }); } catch {}
   refreshBadge();
   send({ t: 'detached', tabId, targetId: info.targetId, reason: reason || 'user' });
@@ -267,12 +435,13 @@ chrome.debugger.onEvent.addListener((src, method, params) => {
   send({ t: 'cdpEvent', targetId: info.targetId, method, params });
 });
 
-chrome.debugger.onDetach.addListener((src) => {
-  const tabId = src.tabId;
-  if (attached.has(tabId)) {
+chrome.debugger.onDetach.addListener((source) => {
+  const tabId = source.tabId;
+  const info = attached.get(tabId);
+  if (info) {
     attached.delete(tabId);
+    persistRuntimeState();
     refreshBadge();
-    const info = attached.get(tabId) || { targetId: 'tb-target-' + tabId };
     send({ t: 'detached', tabId, targetId: info.targetId, reason: 'browser' });
   }
 });
@@ -287,7 +456,8 @@ chrome.action.onClicked.addListener(async (tab) => {
 
 async function optIn(tabId) {
   optedIn.add(tabId);
-  try { await attachTab(tabId); } catch (e) { optedIn.delete(tabId); log('attach failed', e); }
+  await persistOptedIn();
+  try { await attachTab(tabId); } catch (e) { optedIn.delete(tabId); await persistOptedIn(); log('attach failed', e); }
 }
 
 chrome.tabs.onCreated.addListener((tab) => {
@@ -301,8 +471,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   if (attached.has(tabId)) {
     const info = attached.get(tabId);
     attached.delete(tabId);
+    persistOptedIn();
+    persistRuntimeState();
     send({ t: 'detached', tabId, targetId: info.targetId, reason: 'closed' });
     refreshBadge();
+  } else {
+    persistOptedIn();
   }
 });
 
@@ -327,14 +501,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           try { const tab = await chrome.tabs.get(tabId); info.url = (tab.url || '').slice(0, 40); } catch {}
           attachedInfo.push(info);
         }
-        sendResponse({ connected, relay: opts.relay, scopeMode: opts.scopeMode, allowlist: opts.allowlist, attached: attachedInfo, token: !!opts.token, configured: !!opts.configured });
+        sendResponse({ connected, relay: opts.relay, scopeMode: opts.scopeMode, allowlist: opts.allowlist, attached: attachedInfo, token: !!opts.token, configured: !!opts.configured, keepalive: { offscreen: !!keepalivePort, alarm: true, lastPongAgoMs: lastPongAt ? Date.now() - lastPongAt : null } });
         return;
       }
       case 'saveOpts': {
         Object.assign(opts, msg.opts);
         await saveOpts();
+        await ensureOffscreen();
+        await ensureAlarm();
+        retryDelay = 2000;
         connect(); // reconnect with new settings
-        if (msg.opts.scopeMode === 'full' && connected) setTimeout(autoAttachAll, 1500);
+        if (msg.opts.scopeMode === 'full') setTimeout(() => { if (connected) autoAttachAll(); }, 1500);
         sendResponse({ ok: true });
         return;
       }
@@ -343,6 +520,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (found) {
           Object.assign(opts, { relay: found, configured: true });
           await saveOpts();
+          await ensureOffscreen();
+          await ensureAlarm();
+          retryDelay = 2000;
           connect();
           sendResponse({ ok: true, relay: found });
         } else {
@@ -389,8 +569,22 @@ async function rebuildAttached() {
   } catch (e) { log('rebuildAttached failed', e); }
 }
 
-loadOpts().then(async () => {
+// ---- boot ----
+
+// Runs on every cold start of the worker (extension load, browser restart,
+// worker restart after termination). Restores persisted state, ensures the
+// keepalive chain (offscreen doc + alarm) is in place, and connects.
+async function boot() {
+  if (booted) return;
+  booted = true;
+  await loadOpts();
+  await restoreOptedIn();
   await rebuildAttached();
+  await restoreRuntimeState();
   log('boot', opts.relay, opts.configured ? '(configured)' : '(unconfigured)', `attached=${attached.size}`);
+  await ensureOffscreen();
+  await ensureAlarm();
   connect();
-});
+}
+
+boot().catch((e) => log('boot failed', e));

@@ -2,7 +2,7 @@
 
 Let AI agents on your **Tailscale network** control a **real Chrome** — scoped to pages you allow, or the whole browser. Minimal self-hosted [Playwriter](https://github.com/remorses/playwriter), tailnet-native.
 
-**Status: M1** — stateful snippet sessions, CLI, MCP server, auto-discovery. Working in daily use against real Chrome.
+**Status: M1** — stateful snippet sessions, CLI, MCP server, auto-discovery, background keep-alive. Working in daily use against real Chrome.
 
 ```
 Chrome + extension ──ws──► relay :8787 ◄──ws── agents (CLI / MCP / npx)
@@ -63,3 +63,13 @@ tailbrowser scope | health
 ## Dev
 
 `bash scripts/smoke.sh` — end-to-end test (relay + fake extension + headless chromium, no real Chrome needed). `agent/fake-extension.mjs` simulates the extension against real headless Chromium for CI.
+
+## Background / keep-alive architecture
+
+Chrome terminates MV3 service workers ~30s after their last event, and since Chrome 116 WebSocket traffic **no longer counts** as an event — so a backgrounded browser used to silently drop the relay link. tailbrowser layers three mechanisms (all zero-config):
+
+1. **Offscreen document + runtime port** (primary): a hidden offscreen doc pings the service worker over a `chrome.runtime` port every 20s; every message resets the worker's idle timer. Offscreen docs are never throttled, so this works with Chrome fully in the background.
+2. **`chrome.alarms` fallback** (every 30s): if the worker is terminated anyway (memory pressure, crash), the alarm fires, Chrome restarts the worker, and it reconnects + re-advertises attached targets automatically. `chrome.debugger` attachments survive worker restarts; opts/opt-ins persist via `chrome.storage`.
+3. **App-level WS ping/pong** (20s ping / 75s deadline): detects half-open sockets after sleep/wake or network switches and recycles the connection. The relay applies the same discipline in reverse and fails agent commands fast (`TB_ERR: extension not connected`) instead of stalling 30s on a dead pipe.
+
+The popup shows live keep-alive status (`port ✓ · last relay pong Ns ago`).

@@ -107,6 +107,9 @@ function extSend(msg) {
 
 let extCorr = 1;
 function extCommand(targetId, method, params, meta) {
+  if (!ext || ext.ws.readyState !== WebSocket.OPEN) {
+    return Promise.reject(new Error('TB_ERR: extension not connected'));
+  }
   return new Promise((resolve, reject) => {
     const id = extCorr++;
     const timer = setTimeout(() => {
@@ -348,15 +351,31 @@ server.on('upgrade', (req, socket, head) => {
 
 // ---------- extension pipe ----------
 
+const EXT_PING_MS = 20_000;       // ping the extension pipe this often
+const EXT_DEAD_AFTER_MS = Number(process.env.TB_TEST_EXT_DEAD_MS) || 75_000; // no traffic for this long => treat as dead
+
 function onExtensionWs(ws) {
   if (ext) {
     // replace the old one (device restarted chrome etc.)
     try { ext.ws.close(4009, 'replaced'); } catch {}
   }
-  ext = { ws, targets: new Map(), scope: { mode: 'unknown' }, pending: new Map() };
+  ext = { ws, targets: new Map(), scope: { mode: 'unknown' }, pending: new Map(), lastSeen: Date.now() };
+  const extPing = setInterval(() => {
+    if (!ext || ext.ws !== ws) return clearInterval(extPing);
+    if (ws.readyState !== WebSocket.OPEN) return clearInterval(extPing);
+    if (Date.now() - ext.lastSeen > EXT_DEAD_AFTER_MS) {
+      // half-open socket (extension machine slept, network dropped): kill it
+      // so CDP clients fail fast instead of stalling on a dead pipe
+      log('extension silent > 75s — terminating half-open connection');
+      try { ws.terminate(); } catch {}
+      return clearInterval(extPing);
+    }
+    try { ws.ping(); } catch {}
+  }, EXT_PING_MS);
   log('extension connected');
   ws.on('message', (data) => {
     const raw = String(data);
+    ext.lastSeen = Date.now();
     if (raw === 'ping') return ws.send('pong');
     if (raw === 'pong') return;
     let msg; try { msg = JSON.parse(raw); } catch { return; }
@@ -406,8 +425,12 @@ function onExtensionWs(ws) {
       }
     }
   });
+  ws.on('pong', () => { if (ext && ext.ws === ws) ext.lastSeen = Date.now(); });
   ws.on('close', () => {
     if (ext && ext.ws === ws) {
+      // fail pending extension commands immediately — don't make agents wait 30s
+      for (const [, p] of ext.pending) { clearTimeout(p.timer); p.reject(new Error('TB_ERR: extension disconnected')); }
+      ext.pending.clear();
       ext = null;
       log('extension disconnected');
       for (const conn of cdpConns) for (const [tid] of conn.targetSessions) emitDetachedFromTarget(conn, tid);

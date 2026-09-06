@@ -5,7 +5,14 @@ function render(status) {
   const configured = status.configured === true;
   const unconfigured = !configured;
   $('status').textContent = unconfigured ? 'Not configured — enter relay URL, then Save'
-    : status.connected ? 'Connected to relay' : 'Connecting / relay unreachable…';
+    : status.connected ? (status.keepalive && status.keepalive.offscreen
+        ? 'Connected — background keep-alive active'
+        : 'Connected (starting keep-alive…)')
+    : 'Connecting / relay unreachable…';
+  if (status.keepalive) {
+    const ka = status.keepalive;
+    $('keepalive').textContent = `keep-alive: ${ka.offscreen ? 'port ✓' : 'port ✗'} · last relay pong ${ka.lastPongAgoMs != null ? Math.round(ka.lastPongAgoMs / 1000) + 's ago' : '—'}`;
+  }
   $('status').className = status.connected ? 'ok' : 'bad';
   $('relay').value = status.relay || '';
   if (!unconfigured) $('token').placeholder = status.token ? '(set — leave blank to keep)' : 'optional — relay may run tokenless';
@@ -67,5 +74,8 @@ $('revoke').onclick = async () => {
 };
 
 // show setup hint immediately, before first getStatus resolves
-render({ connected: false, relay: '', scopeMode: 'tab', allowlist: [], attached: [] });
+render({ connected: false, relay: '', scopeMode: 'tab', allowlist: [], attached: [], keepalive: null });
 refresh();
+
+// live-refresh while the popup is open so the user can watch it come up
+setInterval(refresh, 2000);

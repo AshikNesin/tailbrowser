@@ -38,13 +38,19 @@ function findChrome() {
     process.env.CHROME_BIN,
     ...(process.env.PLAYWRIGHT_BROWSERS_PATH ? [path.join(process.env.PLAYWRIGHT_BROWSERS_PATH, 'chromium-*')] : []),
   ].filter(Boolean);
-  const roots = ['/usr/bin', '/usr/local/bin', '/opt/google/chrome/chrome', '/snap/bin', path.join(os.homedir(), '.cache/ms-playwright')];
+  const roots = [path.join(os.homedir(), '.cache/ms-playwright'), '/usr/bin', '/usr/local/bin', '/opt/google/chrome/chrome', '/snap/bin'];
   for (const r of roots) {
     try {
-      for (const e of fs.readdirSync(r)) {
-        if (/^(chromium|chrome|google-chrome|chromium-browser|headless_shell|chrome-headless-shell)/.test(e)) {
-          return path.join(r, e);
-        }
+      const entries = fs.readdirSync(r)
+        .filter((e) => /^(chromium|chrome|google-chrome|headless_shell|chrome-headless-shell)/.test(e))
+        .sort()
+        .reverse(); // newest build number first (chromium-1243 > chromium-1200)
+      for (const e of entries) {
+        const p = path.join(r, e);
+        // prefer full chromium builds over headless shells for realistic CDP
+        if (fs.statSync(p).isDirectory() && fs.existsSync(path.join(p, 'chrome-linux64/chrome'))) return p;
+        if (fs.statSync(p).isDirectory() && fs.existsSync(path.join(p, 'chrome-linux/chrome'))) return p;
+        if (fs.statSync(p).isFile() && /chrome/.test(e)) return p;
       }
     } catch {}
   }
