@@ -153,16 +153,19 @@ await browser.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOn
 pageSession = await attachedPromise;
 log('page session', pageSession);
 
-// report scope + target to relay
+let ws;
+const extSend = (msg) => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); };
+
+// every target we've advertised to the relay: targetId -> { sessionId, url }
+const targets = new Map();
+
 function reportScope() {
   extSend({ t: 'scope', mode: SCOPE_MODE, allowlist: [] });
 }
-function reportAttached() {
-  extSend({ t: 'attached', tabId: 1, targetId, url: START_URL, title: '' });
+function reportAttached(targetId, url) {
+  targets.set(targetId, { sessionId: null, url });
+  extSend({ t: 'attached', tabId: 1, targetId, url, title: '' });
 }
-
-let ws;
-const extSend = (msg) => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); };
 
 const pending = new Map();
 let corr = 1;
@@ -173,7 +176,9 @@ function connect() {
   ws.on('open', () => {
     log('connected to relay');
     reportScope();
-    reportAttached();
+    // re-advertise all known targets (post-reconnect, like the real extension)
+    for (const [tid, t] of targets) extSend({ t: 'attached', tabId: 1, targetId: tid, url: t.url, title: '' });
+    if (!targets.size) reportAttached(targetId, START_URL);
     const hb = setInterval(() => { if (ws.readyState === 1) ws.send('ping'); }, 20000);
     ws.on('close', () => clearInterval(hb));
   });
@@ -197,30 +202,69 @@ function connect() {
 async function handleCdp(msg) {
   const { id, method, params } = msg;
   if (method === 'Target.createTarget') {
-    const r = await browser.send('Target.createTarget', params);
-    // M0 fake: only one page target reported; treat new target as replacement
-    return extSend({ t: 'cdpResult', id, ok: true, result: r });
+    // mirror the real extension: create, attach, ADVERTISE, then reply with the
+    // real CDP targetId (Playwright destructures it from this response).
+    // NB: the attachedToTarget event can arrive BEFORE the createTarget
+    // response — register the listener first or we miss it (classic CDP race).
+    const sessPromise = new Promise((resolve) => {
+      const t = setTimeout(() => resolve(null), 8000);
+      const h = (m) => {
+        if (m.method === 'Target.attachedToTarget' && m.params.targetInfo.type === 'page') {
+          clearTimeout(t);
+          resolve({ sessionId: m.params.sessionId, targetId: m.params.targetInfo.targetId, url: m.params.targetInfo.url });
+        }
+      };
+      browser.on(h);
+    });
+    const r = await browser.send('Target.createTarget', { ...params, url: params?.url || 'about:blank' });
+    const ev = await sessPromise;
+    const tid = (ev && ev.targetId === r.targetId && ev.targetId) || r.targetId;
+    if (ev && ev.sessionId) {
+      targets.set(tid, { sessionId: ev.sessionId, url: params?.url || 'about:blank' });
+      extSend({ t: 'attached', tabId: 1, targetId: tid, url: params?.url || 'about:blank', title: '' });
+      await browser.send('Page.enable', {}, ev.sessionId).catch(() => {});
+      await browser.send('Runtime.runIfWaitingForDebugger', {}, ev.sessionId).catch(() => {});
+    }
+    return extSend({ t: 'cdpResult', id, ok: true, result: { targetId: tid, newTab: true } });
   }
   if (method === 'Page.navigate') {
-    const r = await browser.send('Page.navigate', params, pageSession);
-    extSend({ t: 'targetInfoChanged', targetId, url: params.url });
+    const sess = sessionFor(msg.targetId);
+    const r = await browser.send('Page.navigate', params, sess);
+    const t = targets.get(msg.targetId);
+    if (t) t.url = params.url;
+    extSend({ t: 'targetInfoChanged', targetId: msg.targetId, url: params.url });
     return extSend({ t: 'cdpResult', id, ok: true, result: r });
   }
   if (method === 'Target.closeTarget') {
-    return extSend({ t: 'cdpResult', id, ok: true, result: { success: true } });
+    const sess = sessionFor(msg.targetId);
+    if (sess) await browser.send('Target.closeTarget', { targetId: msg.targetId }, undefined).catch(() => {});
+    targets.delete(msg.targetId);
+    return extSend({ t: 'detached', targetId: msg.targetId, reason: 'closed' }, msg.targetId),
+      extSend({ t: 'cdpResult', id, ok: true, result: { success: true } });
   }
-  // generic: forward to the page session
-  const r = await browser.send(method, params, pageSession);
+  // generic: forward to the right page session
+  const sess = sessionFor(msg.targetId);
+  const r = await browser.send(method, params, sess);
   extSend({ t: 'cdpResult', id, ok: true, result: r });
-  // forward interesting events back
 }
 
-// pump all page-session events to the relay
+function sessionFor(targetId) {
+  const t = targets.get(targetId);
+  if (t && t.sessionId) return t.sessionId;
+  return pageSession; // fallback: the initial page
+}
+
+// pump all page-session events back to the relay
 browser.on((msg) => {
-  if (msg.method && msg.sessionId === pageSession) {
-    extSend({ t: 'cdpEvent', targetId, method: msg.method, params: msg.params });
+  if (!msg.method) return;
+  for (const [tid, t] of targets) {
+    if (msg.sessionId && (msg.sessionId === t.sessionId || (!t.sessionId && msg.sessionId === pageSession))) {
+      extSend({ t: 'cdpEvent', targetId: tid, method: msg.method, params: msg.params });
+    }
   }
 });
+
+targets.set(targetId, { sessionId: pageSession, url: START_URL });
 
 connect();
 

@@ -15,22 +15,31 @@ function render(status) {
   }
   $('status').className = status.connected ? 'ok' : 'bad';
   $('relay').value = status.relay || '';
-  if (!unconfigured) $('token').placeholder = status.token ? '(set — leave blank to keep)' : 'optional — relay may run tokenless';
+  if (!unconfigured) $('token').placeholder = status.token ? '(set — type none to clear)' : 'optional — relay may run tokenless';
   $('scope').value = status.scopeMode || 'tab';
   $('allowRow').classList.toggle('hidden', status.scopeMode !== 'allowlist');
   $('allowlist').value = (status.allowlist || []).join(', ');
   const box = $('tabs');
   box.innerHTML = '';
-  if (!status.attached.length) { box.innerHTML = '<div class="muted">none — open a tab and click this extension icon on it, then Opt-in below</div>'; return; }
-  for (const tabId of status.attached) {
+  const attached = status.attached || [];
+  if (!attached.length) { box.innerHTML = '<div class="muted">none — open a tab and click this extension icon on it, then Opt-in below</div>'; return; }
+  for (const a of attached) {
     const row = document.createElement('div');
     row.className = 'tab';
-    const u = document.createElement('span'); u.className = 'u'; u.textContent = '#' + tabId;
+    const u = document.createElement('span'); u.className = 'u';
+    u.textContent = `#${a.tabId} ${a.url || ''}`;
     const out = document.createElement('button'); out.textContent = 'Opt-out';
-    out.onclick = () => chrome.runtime.sendMessage({ t: 'optOut', tabId }, refresh);
+    out.onclick = () => chrome.runtime.sendMessage({ t: 'optOut', tabId: a.tabId }, refresh);
     row.append(u, out);
     box.append(row);
   }
+}
+
+async function currentTab() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    return tab || null;
+  } catch { return null; }
 }
 
 async function refresh() {
@@ -41,14 +50,19 @@ async function refresh() {
 $('scope').onchange = () => $('allowRow').classList.toggle('hidden', $('scope').value !== 'allowlist');
 
 $('save').onclick = async () => {
+  const tokenField = $('token').value.trim();
+  // "none" (or literal empty on first configure) clears the token;
+  // otherwise blank keeps the stored one — no way to silently lose auth
+  let token = tokenField;
+  if (tokenField === 'none' || tokenField.toLowerCase() === 'none') token = '';
+  if (tokenField === '') token = undefined; // undefined = keep existing
   const opts = {
     relay: $('relay').value.trim(),
-    token: $('token').value.trim(),
+    token,
     configured: true,
     scopeMode: $('scope').value,
     allowlist: $('allowlist').value.split(',').map(s => s.trim()).filter(Boolean),
   };
-  // blank token field on save = clear the token (tokenless mode)
   await chrome.runtime.sendMessage({ t: 'saveOpts', opts });
   setTimeout(refresh, 400);
 };

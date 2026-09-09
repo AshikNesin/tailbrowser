@@ -1,9 +1,11 @@
 {
   "name": "tailbrowser",
-  "version": "0.2.1",
-  "description": "Let AI agents control your real Chrome over your tailnet — scoped to pages you allow or the whole browser",
+  "version": "0.3.0",
+  "description": "Let AI agents control your real Chrome over your tailnet \u2014 scoped to pages you allow or the whole browser",
   "type": "module",
-  "bin": { "tailbrowser": "./agent/tailbrowser.mjs" },
+  "bin": {
+    "tailbrowser": "./agent/tailbrowser.mjs"
+  },
   "main": "./agent/index.mjs",
   "exports": {
     ".": "./agent/index.mjs",
@@ -17,13 +19,24 @@
   ],
   "scripts": {
     "start:relay": "node relay/relay.mjs",
-    "smoke": "bash scripts/smoke.sh"
+    "smoke": "bash scripts/smoke.sh",
+    "stability": "node scripts/stability-test.mjs"
   },
-  "keywords": ["tailscale", "playwright", "cdp", "browser-automation", "mcp", "ai-agents", "chrome"],
+  "keywords": [
+    "tailscale",
+    "playwright",
+    "cdp",
+    "browser-automation",
+    "mcp",
+    "ai-agents",
+    "chrome"
+  ],
   "license": "MIT",
   "dependencies": {
     "playwright-core": "^1.50.0",
     "ws": "^8.18.0"
   },
-  "engines": { "node": ">=18" }
+  "engines": {
+    "node": ">=18"
+  }
 }

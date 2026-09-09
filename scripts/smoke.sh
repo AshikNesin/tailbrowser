@@ -4,7 +4,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if [ ! -d node_modules/ws ] || [ ! -d node_modules/playwright-core ]; then npm i --no-fund --no-audit; fi
-if [ ! -d "${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"/chromium_headless_shell-* ]; then
+# shellcheck disable=SC2206
+PW_DIR="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
+if ! ls -d "$PW_DIR"/chromium_headless_shell-* >/dev/null 2>&1; then
   npx playwright-core install chromium-headless-shell
 fi
 

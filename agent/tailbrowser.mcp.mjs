@@ -10,6 +10,14 @@ import { resolveHost } from './discover.mjs';
 let HOST = null;
 const TOKEN = process.env.TAILBROWSER_TOKEN || '';
 const httpBase = () => HOST.replace(/^ws/, 'http');
+const FETCH_TIMEOUT_MS = 15_000;
+
+function describeFetchError(e) {
+  const s = String((e && (e.cause?.code || e.code || e.message)) || e || 'unknown');
+  if (/ECONNREFUSED/i.test(s)) return `relay not reachable at ${HOST} (connection refused) — is it running? (tailbrowser relay) / extension connected? (check popup) — verify: curl -m 5 ${httpBase()}/health`;
+  if (/abort|AbortError|timeout|ETIMEDOUT/i.test(s)) return `relay ${HOST} timed out — black-holed address? verify: curl -m 5 ${httpBase()}/health`;
+  return s;
+}
 
 const TOOL = {
   name: 'execute',
@@ -46,12 +54,19 @@ async function callExecute({ code, sessionId }) {
   }
   const body = { code };
   if (sessionId) body.sessionId = sessionId;
-  const res = await fetch(`${httpBase()}/execute${TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ''}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return res.json();
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS + 105_000); // snippets can take up to 120s
+  try {
+    const res = await fetch(`${httpBase()}/execute${TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ''}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ac.signal,
+    });
+    return await res.json();
+  } catch (e) {
+    return { ok: false, error: describeFetchError(e), sessionId: sessionId || '1' };
+  } finally { clearTimeout(t); }
 }
 
 rl.on('line', (line) => {
@@ -61,7 +76,7 @@ rl.on('line', (line) => {
   try { msg = JSON.parse(line); } catch { return; }
   (async () => {
     if (msg.method === 'initialize') {
-      return send({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'tailbrowser', version: '0.2.0' } } });
+      return send({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'tailbrowser', version: '0.3.0' } } });
     }
     if (msg.method === 'notifications/initialized') return;
     if (msg.method === 'ping') return send({ jsonrpc: '2.0', id: msg.id, result: {} });

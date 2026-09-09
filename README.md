@@ -2,7 +2,7 @@
 
 Let AI agents on your **Tailscale network** control a **real Chrome** — scoped to pages you allow, or the whole browser. Minimal self-hosted [Playwriter](https://github.com/remorses/playwriter), tailnet-native.
 
-**Status: M1** — stateful snippet sessions, CLI, MCP server, auto-discovery, background keep-alive. Working in daily use against real Chrome.
+**Status: M1.1** — hardened relay (fault-isolated, self-healing Playwright link, real CDP attach semantics). — stateful snippet sessions, CLI, MCP server, auto-discovery, background keep-alive. Working in daily use against real Chrome.
 
 ```
 Chrome + extension ──ws──► relay :8787 ◄──ws── agents (CLI / MCP / npx)
@@ -63,6 +63,21 @@ tailbrowser scope | health
 ## Dev
 
 `bash scripts/smoke.sh` — end-to-end test (relay + fake extension + headless chromium, no real Chrome needed). `agent/fake-extension.mjs` simulates the extension against real headless Chromium for CI.
+`node scripts/stability-test.mjs` — stability regression suite (crash isolation, flap recovery, newPage, concurrency, EADDRINUSE).
+
+## Stability model (what keeps it up)
+
+tailbrowser is designed to run unattended for weeks. The relay is the long-lived piece; browsers and machines flap — it must not.
+
+**Fault isolation:** no request, WebSocket frame, or snippet can kill the relay process. Bad JSON → `400`, unknown envelope types → ignored, garbage frames → dropped, handler bugs → logged (`UNCAUGHT (survived)`) and served through. The original crash bugs (malformed `/execute` bodies, `targetInfoChanged` races) are locked out by `scripts/stability-test.mjs`.
+
+**Self-healing Playwright connection:** the relay recycles its internal Playwright link whenever the extension generation changes (Chrome restart, network flap, machine sleep). Previously a single extension drop poisoned it until the relay was manually restarted — the main "it goes down whenever I use it" cause.
+
+**Fail-fast everywhere:** agents get typed `TB_ERR` / `TB_TIMEOUT` errors in milliseconds instead of 30s+ stalls; `newPage()`/`attachToTarget` speak real CDP semantics (`sessionId` in responses, real target ids) so Playwright's own fast paths work.
+
+**Diagnosability:** every log line is timestamped; an event-loop stall watchdog flags a hanging synchronous snippet; `curl <relay>/health` answers in one round-trip.
+
+Run the regression suite: `node scripts/stability-test.mjs` (13 checks: crash isolation, flap recovery without restart, `newPage()` end-to-end, concurrent load, garbage frames, session-state poisoning, friendly `EADDRINUSE`).
 
 ## Background / keep-alive architecture
 

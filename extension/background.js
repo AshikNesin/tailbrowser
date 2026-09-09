@@ -40,6 +40,7 @@ let lastPongAt = 0; // last time we heard anything from the relay
 let reconnectTimer = 0;
 let retryDelay = 2000; // reconnect backoff, reset on successful connect
 let booted = false; // guards against re-entrant boot() via alarm firing early
+let revoked = false; // true after "Disconnect agent" — stop dialing until re-saved
 
 // ---- persistence ----
 
@@ -188,6 +189,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // configured, dial.
 async function ensureConnection() {
   clearTimeout(reconnectTimer);
+  if (revoked) return; // user revoked agent access — intentionally dark
   if (ws && connected) {
     const staleFor = Date.now() - lastPongAt;
     if (staleFor > PONG_DEADLINE_MS) {
@@ -196,6 +198,13 @@ async function ensureConnection() {
       return;
     }
     return; // healthy
+  }
+  // stuck-CONNECTING socket: a half-open TCP endpoint can sit in CONNECTING
+  // forever. Anything older than the pong deadline gets terminated and redialed.
+  if (ws && ws.readyState === 0 && ws.__openedAt && Date.now() - ws.__openedAt > PONG_DEADLINE_MS) {
+    log('socket stuck in CONNECTING — recycling');
+    try { ws.close(); } catch {}
+    return; // onclose -> reconnect timer
   }
   if (!ws && opts && opts.configured) {
     reconnectTimer = setTimeout(() => connect(), 0);
@@ -248,6 +257,7 @@ function connect() {
   clearTimeout(reconnectTimer);
   log('connecting', opts.relay);
   const sock = new WebSocket(`${opts.relay}/extension?token=${encodeURIComponent(opts.token)}&v=1`);
+  sock.__openedAt = Date.now(); // birth time for stuck-CONNECTING detection
   ws = sock;
   sock.onopen = () => {
     if (ws !== sock) return; // stale socket won the race
@@ -268,6 +278,7 @@ function connect() {
     connected = false;
     ws = null;
     refreshBadge();
+    if (revoked) return; // user revoked — stay down until they save settings
     // retry while configured, with mild backoff (2s -> 30s) so a dead relay
     // doesn't spin the CPU; alarms still tick as a backstop
     if (opts.configured) {
@@ -308,18 +319,18 @@ async function handleMessage(raw) {
       return;
     }
     case 'cdp': {
-      // relay -> extension: run a CDP command on a target
+      // relay -> extension: run a CDP command on a target. Isolated: a throw
+      // here must never leave the relay hanging — always answer the envelope id.
       const { id, targetId, method, params, sessionId } = msg;
       const tabId = findTabByTarget(targetId);
       try {
-        if (method === 'Target.createTarget' && tabId == null) {
+        if (method === 'Target.createTarget' && targetId == null) {
           // browser-level create target: only in full mode
           if (opts.scopeMode !== 'full') throw new Error('TB_SCOPE: creating new tabs requires full-browser mode');
           const url = (params && params.url) || 'about:blank';
           const tab = await chrome.tabs.create({ url, active: false });
-          // attach and report
-          await attachTab(tab.id, { createdByAgent: true });
-          send({ t: 'cdpResult', id, ok: true, result: { targetId: String(tab.id), newTab: true } });
+          const info = await attachTab(tab.id, { createdByAgent: true });
+          send({ t: 'cdpResult', id, ok: true, result: { targetId: info.targetId, newTab: true } });
           return;
         }
         if (tabId == null) throw new Error('TB_SCOPE: unknown or unpermitted target ' + targetId);
@@ -343,10 +354,10 @@ async function handleMessage(raw) {
     }
     case 'closeTab': {
       const tabId = findTabByTarget(msg.targetId);
-      if (tabId == null) return send({ t: 'ok', id: msg.id, error: 'TB_SCOPE: unknown target' });
-      if (opts.scopeMode !== 'full') return send({ t: 'ok', id: msg.id, error: 'TB_SCOPE: closing tabs requires full-browser mode' });
-      try { await chrome.tabs.remove(tabId); send({ t: 'ok', id: msg.id }); }
-      catch (e) { send({ t: 'ok', id: msg.id, error: String(e && e.message || e) }); }
+      if (tabId == null) return send({ t: 'cdpResult', id: msg.id, ok: false, error: 'TB_SCOPE: unknown target' });
+      if (opts.scopeMode !== 'full') return send({ t: 'cdpResult', id: msg.id, ok: false, error: 'TB_SCOPE: closing tabs requires full-browser mode' });
+      try { await chrome.tabs.remove(tabId); send({ t: 'cdpResult', id: msg.id, ok: true, result: { success: true } }); }
+      catch (e) { send({ t: 'cdpResult', id: msg.id, ok: false, error: String(e && e.message || e) }); }
       return;
     }
     case 'detach': {
@@ -386,12 +397,18 @@ async function attachTab(tabId, { createdByAgent = false } = {}) {
   }
   // Resolve the REAL CDP targetId — Playwright treats it as the main frame id,
   // so a synthetic id breaks every frame op ("Frame has been detached").
-  let targetId = 'tb-target-' + tabId; // fallback (never ideal)
-  try {
-    const targets = await chrome.debugger.getTargets();
-    const t = targets.find((x) => x.tabId === tabId);
-    if (t && t.id) targetId = t.id;
-  } catch (e) { log('getTargets failed', e); }
+  // A brand-new tab can take a moment to appear in getTargets — retry briefly
+  // instead of silently falling back to a fake id.
+  let targetId = null;
+  for (let attempt = 0; attempt < 10 && !targetId; attempt++) {
+    try {
+      const targets = await chrome.debugger.getTargets();
+      const t = targets.find((x) => x.tabId === tabId);
+      if (t && t.id) targetId = t.id;
+    } catch (e) { log('getTargets failed', e); }
+    if (!targetId) await new Promise((r) => setTimeout(r, 100));
+  }
+  if (!targetId) throw new Error(`TB_ERR: could not resolve CDP target for tab ${tabId} (is the tab still alive?)`);
   const info = { sessionId: 'tb-' + tabId, targetId };
   attached.set(tabId, info);
   persistRuntimeState();
@@ -505,7 +522,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
       case 'saveOpts': {
-        Object.assign(opts, msg.opts);
+        // undefined token = keep the stored one (popup sends undefined when the
+        // field is blank and the user didn't ask to clear)
+        const incoming = { ...msg.opts };
+        if (incoming.token === undefined) delete incoming.token;
+        revoked = false; // re-saving settings re-authorizes the agent
+        Object.assign(opts, incoming);
         await saveOpts();
         await ensureOffscreen();
         await ensureAlarm();
@@ -533,7 +555,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case 'optIn': await optIn(msg.tabId); sendResponse({ ok: true }); return;
       case 'optOut': await detachTab(msg.tabId, 'user'); optedIn.delete(msg.tabId); sendResponse({ ok: true }); return;
       case 'disconnectAgent': {
-        // hard revoke: close WS; relay kills sessions
+        // hard revoke: close WS and stay down until settings are saved again
+        // (previously it auto-reconnected in 2s, making revoke meaningless)
+        revoked = true;
         if (ws) { try { ws.close(4000, 'revoked'); } catch {} }
         sendResponse({ ok: true });
         return;
@@ -587,4 +611,10 @@ async function boot() {
   connect();
 }
 
-boot().catch((e) => log('boot failed', e));
+boot().catch(async (e) => {
+  // A failed boot used to leave booted=true with no alarm chain — the worker
+  // went dark until Chrome restarted it. Retry instead.
+  log('boot failed — retrying in 5s', String((e && e.message) || e));
+  booted = false;
+  setTimeout(() => { boot().catch(() => {}); }, 5000);
+});

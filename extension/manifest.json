@@ -1,12 +1,27 @@
 {
   "manifest_version": 3,
   "name": "tailbrowser",
-  "version": "0.2.1",
-  "description": "Let AI agents on your tailnet control this Chrome — scoped to pages you allow or the whole browser.",
+  "version": "0.3.0",
+  "description": "Let AI agents on your tailnet control this Chrome \u2014 scoped to pages you allow or the whole browser.",
   "minimum_chrome_version": "116",
-  "background": { "service_worker": "background.js" },
-  "action": { "default_popup": "popup.html" },
-  "permissions": ["debugger", "tabs", "storage", "offscreen", "alarms"],
-  "host_permissions": ["ws://*/*", "wss://*/*", "http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "permissions": [
+    "debugger",
+    "tabs",
+    "storage",
+    "offscreen",
+    "alarms"
+  ],
+  "host_permissions": [
+    "ws://*/*",
+    "wss://*/*",
+    "http://*/*",
+    "https://*/*"
+  ],
   "icons": {}
 }

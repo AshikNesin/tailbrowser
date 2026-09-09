@@ -1,13 +1,16 @@
 #!/usr/bin/env node
-// tailbrowser M0 relay
+// tailbrowser relay — hardened for long-running unattended use.
 // - /extension   : the Chrome extension connects here (JSON envelope protocol)
 // - /cdp/:sess   : Playwright/CDP clients connect here (raw CDP wire protocol)
-// - /session     : HTTP session management (implicit in M0)
+// - /session /execute : HTTP session + snippet management
 // - /health /scope /json/version : HTTP helpers
 //
-// The relay synthesizes the browser-level CDP surface that Playwright's
-// connectOverCDP expects (Target.setDiscoverTargets / setAutoAttach flows)
-// and multiplexes flat per-page sessions onto the extension pipe.
+// Stability rules this file follows:
+//   1. No request, socket message, or snippet can kill the process — every
+//      entry point is fault-isolated (bad JSON -> 400, bad envelope -> drop).
+//   2. The relay is the long-lived piece; browsers/extensions flap, it must not.
+//   3. Fail fast + loudly: agents get typed TB_ERR/TB_TIMEOUT errors, the log
+//      gets timestamps so "why was it down" is answerable from nohup output.
 
 import { WebSocketServer, WebSocket } from 'ws';
 import http from 'node:http';
@@ -87,8 +90,26 @@ if (!TOKEN) {
   console.log('[relay] tokenless mode: tailnet membership is the only gate (fine for a personal tailnet)');
 }
 
-const log = (...a) => console.log('[relay]', ...a);
-const dlog = (...a) => DEBUG && console.log('[debug]', ...a);
+const log = (...a) => console.log(new Date().toISOString(), '[relay]', ...a);
+const dlog = (...a) => DEBUG && console.log(new Date().toISOString(), '[debug]', ...a);
+
+// ---------- process-level safety net ----------
+// The relay is a daemon: a surprise exception must never take it down. Log
+// loudly and keep serving. (We are single-purpose with no corruptible state
+// that a restart would fix better than a log line.)
+process.on('uncaughtException', (e) => log('UNCAUGHT (survived):', (e && e.stack) || e));
+process.on('unhandledRejection', (e) => log('UNHANDLED REJECTION (survived):', (e && (e.stack || e)) || e));
+
+// event-loop stall watchdog: a synchronous infinite loop inside a snippet
+// freezes the whole relay (vm timeouts cannot guard async code). We cannot
+// stop it from inside the process, but we can leave a breadcrumb in the log
+// so "relay hangs" is diagnosable as "your snippet hung the relay".
+let lastTick = Date.now();
+setInterval(() => {
+  const drift = Date.now() - lastTick;
+  if (drift > 5000) log(`EVENT LOOP STALLED ${Math.round(drift / 1000)}s — a synchronous snippet is likely blocking the relay`);
+  lastTick = Date.now();
+}, 1000).unref();
 
 // ---------- state ----------
 
@@ -97,12 +118,18 @@ let nextSessionId = 1;
 
 // extension connection (single device in M0)
 let ext = null; // { ws, targets: Map<targetId, {targetId, tabId, url, title}>, scope: {mode, allowlist} }
+let extGeneration = 0; // bumped on every extension connect — invalidates cached Playwright connections
 
 // CDP client connections
 const cdpConns = new Set(); // { ws, pending: Map<corrId,{conn,id}>, sessionMap, targetSessions, autoAttach, nextSess }
 
 function extSend(msg) {
   if (ext && ext.ws.readyState === WebSocket.OPEN) ext.ws.send(JSON.stringify(msg));
+}
+
+function failExtPending(pending, error) {
+  for (const [, p] of pending) { clearTimeout(p.timer); p.reject(new Error(error)); }
+  pending.clear();
 }
 
 let extCorr = 1;
@@ -124,11 +151,35 @@ function extCommand(targetId, method, params, meta) {
 // ---------- snippet sandbox (M1) ----------
 
 let sharedBrowser = null; // one Playwright connection for all sessions; tabs shared, state isolated
+let sharedBrowserPromise = null; // guards against concurrent connectOverCDP races
+let sharedBrowserGeneration = -1; // which extension generation the cached browser belongs to
 
 async function getBrowser() {
+  // Extension flapped since we cached the connection? The old Playwright
+  // object graph is poisoned (its pages point at targets that no longer
+  // exist server-side) — drop it and reconnect. This is what used to make
+  // every snippet fail with opaque errors until the relay was restarted.
+  if (sharedBrowser && sharedBrowserGeneration !== extGeneration) {
+    log('extension generation changed — recycling cached Playwright connection');
+    const old = sharedBrowser;
+    sharedBrowser = null;
+    try { await old.close(); } catch {} // closes only its ws to this relay
+  }
   if (!sharedBrowser) {
-    const selfHost = BIND === '0.0.0.0' ? '127.0.0.1' : BIND;
-    sharedBrowser = await chromium.connectOverCDP(`ws://${selfHost}:${PORT}/cdp/sandbox`);
+    if (!sharedBrowserPromise) {
+      const selfHost = BIND === '0.0.0.0' ? '127.0.0.1' : BIND;
+      sharedBrowserPromise = chromium.connectOverCDP(`ws://${selfHost}:${PORT}/cdp/sandbox`)
+        .then((b) => {
+          sharedBrowser = b;
+          sharedBrowserGeneration = extGeneration;
+          b.on('disconnected', () => {
+            if (sharedBrowser === b) { sharedBrowser = null; sharedBrowserGeneration = -1; }
+          });
+          return b;
+        })
+        .finally(() => { sharedBrowserPromise = null; });
+    }
+    sharedBrowser = await sharedBrowserPromise;
   }
   return sharedBrowser;
 }
@@ -173,7 +224,15 @@ async function executeSnippet(sessionId, code) {
     newPage: () => ctx.newPage(), // throws TB_SCOPE via relay unless full-browser mode
   };
   Object.defineProperty(scope, 'page', {
-    get() { return session.state.__page || ctx.pages()[0]; },
+    // Heals across extension flaps: a stale stored Page (from before the
+    // connection was recycled) falls through to a live page automatically.
+    get() {
+      const stored = session.state.__page;
+      if (stored && !stored.isClosed()) { try { if (stored.context() === ctx) return stored; } catch {} }
+      const first = ctx.pages()[0];
+      if (first) return first;
+      throw new Error('TB_ERR: no page available — opt in a tab in the extension popup, or set scope to Entire browser');
+    },
     set(v) { session.state.__page = v; },
     configurable: true,
   });
@@ -229,6 +288,9 @@ function emitTargetCreated(conn, t) {
 }
 
 function emitAttachedToTarget(conn, t) {
+  // idempotent per (conn, target): a second attach for the same target must not
+  // re-emit (Playwright asserts on duplicate targets)
+  if (conn.targetSessions.has(t.targetId)) return conn.targetSessions.get(t.targetId);
   // flat session: one sessionId per (conn, target)
   let sess = conn.targetSessions.get(t.targetId);
   if (!sess) {
@@ -256,6 +318,8 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const json = (code, body) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
 
+  // fault isolation: nothing a client sends may throw past this handler
+  try {
   if (!ipAllowed(req.socket.remoteAddress)) {
     log('rejected', req.socket.remoteAddress, '(not in --allow list)');
     return json(403, { error: 'source ip not allowed' });
@@ -277,11 +341,25 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  const readBody = () => new Promise((resolve) => {
-    let b = '';
-    req.on('data', (c) => b += c);
-    req.on('end', () => resolve(b));
+  // bounded body reader — a huge/mangled POST can't wedge or OOM us
+  const readBody = () => new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > 5 * 1024 * 1024) { reject(new Error('body too large')); req.destroy(); return; }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString()));
+    req.on('error', reject);
   });
+
+  // never let bad client JSON kill us: parse once, safely
+  const readJson = async () => {
+    const raw = await readBody();
+    if (!raw) return {};
+    try { return JSON.parse(raw); } catch { throw Object.assign(new Error('invalid JSON body'), { statusCode: 400 }); }
+  };
 
   if (url.pathname === '/session' && req.method === 'POST') {
     const id = String(nextSessionId++);
@@ -295,7 +373,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === '/session/reset' && req.method === 'POST') {
-    const body = JSON.parse((await readBody()) || '{}');
+    const body = await readJson();
     const s = sessions.get(body.sessionId);
     if (!s) return json(404, { error: 'no such session' });
     s.state = {};
@@ -304,10 +382,12 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === '/execute' && req.method === 'POST') {
-    const body = JSON.parse((await readBody()) || '{}');
-    const id = body.sessionId || String(nextSessionId++);
+    const body = await readJson();
+    if (!body.code || typeof body.code !== 'string') return json(400, { ok: false, error: 'missing "code" string' });
+    if (!ext) return json(200, { ok: false, error: 'TB_ERR: extension not connected — is the Chrome device up? (popup: relay status)' });
+    const id = String(body.sessionId || nextSessionId++);
     try {
-      const { result, logs } = await executeSnippet(id, String(body.code || ''));
+      const { result, logs } = await executeSnippet(id, String(body.code));
       return json(200, { sessionId: id, ok: true, result: safeJson(result), logs });
     } catch (e) {
       return json(200, { sessionId: id, ok: false, error: String((e && e.message) || e), logs: e.logs || [] });
@@ -319,6 +399,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   res.writeHead(404); res.end('not found');
+  } catch (e) {
+    // every route's last line of defense — a bug in a handler degrades to a
+    // 400/500 answer, never a dead daemon
+    log('http handler error', req.method, url.pathname, String((e && e.message) || e));
+    if (!res.headersSent) return json(e.statusCode || 500, { ok: false, error: String((e && e.message) || e) });
+    try { res.end(); } catch {}
+  }
 });
 
 // ---------- WebSocket servers ----------
@@ -326,27 +413,32 @@ const server = http.createServer(async (req, res) => {
 const wss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
-  const url = new URL(req.url, 'http://x');
-  if (!ipAllowed(req.socket.remoteAddress)) {
-    log('rejected ws', req.socket.remoteAddress, '(not in --allow list)');
-    socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
-    socket.destroy();
-    return;
-  }
-  if (TOKEN) {
-    const token = url.searchParams.get('token');
-    if (token !== TOKEN) {
-      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+  try {
+    const url = new URL(req.url, 'http://x');
+    if (!ipAllowed(req.socket.remoteAddress)) {
+      log('rejected ws', req.socket.remoteAddress, '(not in --allow list)');
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
       socket.destroy();
       return;
     }
+    if (TOKEN) {
+      const token = url.searchParams.get('token');
+      if (token !== TOKEN) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      if (url.pathname === '/extension') return onExtensionWs(ws, url);
+      const m = url.pathname.match(/^\/cdp\/([^/]+)$/);
+      if (m) return onCdpWs(ws, decodeURIComponent(m[1]));
+      ws.close(4404, 'not found');
+    });
+  } catch (e) {
+    log('upgrade error', String((e && e.message) || e));
+    try { socket.destroy(); } catch {}
   }
-  wss.handleUpgrade(req, socket, head, (ws) => {
-    if (url.pathname === '/extension') return onExtensionWs(ws, url);
-    const m = url.pathname.match(/^\/cdp\/([^/]+)$/);
-    if (m) return onCdpWs(ws, decodeURIComponent(m[1]));
-    ws.close(4404, 'not found');
-  });
 });
 
 // ---------- extension pipe ----------
@@ -355,10 +447,14 @@ const EXT_PING_MS = 20_000;       // ping the extension pipe this often
 const EXT_DEAD_AFTER_MS = Number(process.env.TB_TEST_EXT_DEAD_MS) || 75_000; // no traffic for this long => treat as dead
 
 function onExtensionWs(ws) {
-  if (ext) {
-    // replace the old one (device restarted chrome etc.)
-    try { ext.ws.close(4009, 'replaced'); } catch {}
+  const replaced = ext;
+  if (replaced) {
+    // replace the old one (device restarted chrome etc.) — fail its in-flight
+    // commands immediately so agents don't stall 30s waiting on a dead pipe
+    failExtPending(replaced.pending, 'TB_ERR: extension disconnected (replaced)');
+    try { replaced.ws.close(4009, 'replaced'); } catch {}
   }
+  extGeneration++;
   ext = { ws, targets: new Map(), scope: { mode: 'unknown' }, pending: new Map(), lastSeen: Date.now() };
   const extPing = setInterval(() => {
     if (!ext || ext.ws !== ws) return clearInterval(extPing);
@@ -374,6 +470,7 @@ function onExtensionWs(ws) {
   }, EXT_PING_MS);
   log('extension connected');
   ws.on('message', (data) => {
+    try { // every message is isolated: a malformed frame kills no one
     const raw = String(data);
     ext.lastSeen = Date.now();
     if (raw === 'ping') return ws.send('pong');
@@ -386,6 +483,7 @@ function onExtensionWs(ws) {
         log('scope', JSON.stringify(ext.scope));
         return;
       case 'attached': {
+        if (!msg.targetId) return; // ignore malformed
         const t = { targetId: msg.targetId, tabId: msg.tabId, url: msg.url, title: msg.title };
         ext.targets.set(t.targetId, t);
         log('target attached', t.targetId, t.url);
@@ -396,8 +494,11 @@ function onExtensionWs(ws) {
         return;
       }
       case 'targetInfoChanged': {
+        // a just-detached/closed tab can still emit one last change; ignore
+        // unknown targets instead of blowing up (this used to kill the relay)
         const t = ext.targets.get(msg.targetId);
-        if (t) { t.url = msg.url; }
+        if (!t) return dlog('targetInfoChanged for unknown target — ignored');
+        t.url = msg.url;
         for (const conn of cdpConns) cdpSend(conn, { method: 'Target.targetInfoChanged', params: { targetInfo: targetInfo(t) } });
         return;
       }
@@ -424,19 +525,19 @@ function onExtensionWs(ws) {
         return;
       }
     }
+    } catch (e) { log('ext message handler error (isolated):', String((e && e.message) || e)); }
   });
   ws.on('pong', () => { if (ext && ext.ws === ws) ext.lastSeen = Date.now(); });
   ws.on('close', () => {
     if (ext && ext.ws === ws) {
       // fail pending extension commands immediately — don't make agents wait 30s
-      for (const [, p] of ext.pending) { clearTimeout(p.timer); p.reject(new Error('TB_ERR: extension disconnected')); }
-      ext.pending.clear();
+      failExtPending(ext.pending, 'TB_ERR: extension disconnected');
       ext = null;
       log('extension disconnected');
       for (const conn of cdpConns) for (const [tid] of conn.targetSessions) emitDetachedFromTarget(conn, tid);
     }
   });
-  ws.on('error', () => {});
+  ws.on('error', (e) => log('ext socket error (continuing):', String((e && e.message) || e)));
   ws.send(JSON.stringify({ t: 'hello' }));
 }
 
@@ -463,6 +564,7 @@ async function onCdpWs(ws, sessionId) {
     let msg; try { msg = JSON.parse(String(data)); } catch { return; }
     dlog('cdp ◄', JSON.stringify(msg).slice(0, 300));
     const { id, method, params = {} } = msg;
+    if (id == null && !method) return; // not a command we can answer
     const cdpSessionId = msg.sessionId; // flat protocol
     try {
       // --- browser-session commands (no sessionId) ---
@@ -488,10 +590,11 @@ async function onCdpWs(ws, sessionId) {
           case 'Target.attachToTarget': {
             const t = ext && ext.targets.get(params.targetId);
             if (!t) return fail(id, 'TB_SCOPE: unknown or unpermitted target');
-            reply(id, {}); // placeholder replaced below
-            // emit flat attach via synthetic flow
+            // real CDP returns { sessionId } — Playwright destructures it.
+            // Idempotent: reuse the existing session if this conn already
+            // attached to the target (avoid duplicate attachedToTarget events).
             emitAttachedToTarget(conn, t);
-            // NOTE: real CDP returns {sessionId} in the response; we emulate via event
+            reply(id, { sessionId: conn.targetSessions.get(t.targetId) });
             return;
           }
           case 'Target.createTarget': {
@@ -551,7 +654,7 @@ async function onCdpWs(ws, sessionId) {
     cdpConns.delete(conn);
     log('cdp client disconnected', `session=${sessionId}`);
   });
-  ws.on('error', () => {});
+  ws.on('error', (e) => log('cdp socket error (continuing):', String((e && e.message) || e)));
 }
 
 // session idle sweep
@@ -559,6 +662,16 @@ setInterval(() => {
   const now = Date.now();
   for (const s of sessions.values()) if (now - s.lastUsed > 30 * 60_000) sessions.delete(s.id);
 }, 60_000);
+
+server.on('error', (e) => {
+  if (e && e.code === 'EADDRINUSE') {
+    console.error(`\n  ✗ port ${PORT} is already in use on ${BIND}.\n`);
+    console.error(`    A relay is probably already running — health-check it:  curl http://${BIND === '0.0.0.0' ? '127.0.0.1' : BIND}:${PORT}/health`);
+    console.error(`    If it should be dead:  lsof -ti :${PORT} | xargs kill\n`);
+    process.exit(1);
+  }
+  log('server error', String((e && e.message) || e));
+});
 
 server.listen(PORT, BIND, () => {
   const selfHost = BIND === '0.0.0.0' ? '<this-machine-ip>' : BIND;

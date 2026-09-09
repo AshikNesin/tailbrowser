@@ -13,8 +13,26 @@ import { resolveHost, discover, configPath } from './discover.mjs';
 
 let HOST = null;
 const TOKEN = process.env.TAILBROWSER_TOKEN || '';
+const FETCH_TIMEOUT_MS = 15_000; // relay unreachable/black-holed → error in seconds, not a hang
 
 const qs = () => (TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : '');
+
+async function fetchTimeout(url, opts = {}) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...opts, signal: ac.signal });
+  } finally { clearTimeout(t); }
+}
+
+function friendlyApiError(e, path) {
+  const s = String((e && (e.cause?.code || e.code || e.message)) || e || 'unknown');
+  if (/ECONNREFUSED/i.test(s)) return `relay not reachable at ${HOST} (connection refused) — is it running? Start it with: tailbrowser relay  (or check TAILBROWSER_HOST) [${path}]`;
+  if (/ENETUNREACH|EHOSTUNREACH/i.test(s)) return `relay ${HOST} unreachable at network level — VPN/proxy intercepting the tailnet range? [${path}]`;
+  if (/abort|AbortError|timeout|ETIMEDOUT/i.test(s)) return `relay ${HOST} timed out — black-holed address? verify: curl -m 5 ${String(HOST).replace(/^ws/, 'http')}/health [${path}]`;
+  if (/EAI_AGAIN|ENOTFOUND/i.test(s)) return `cannot resolve relay host ${HOST} (DNS) — check TAILBROWSER_HOST [${path}]`;
+  return s;
+}
 
 function loadConfig() {
   try { return JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch { return {}; }
@@ -27,10 +45,15 @@ function saveConfig(cfg) {
 
 async function api(path, opts = {}) {
   const httpBase = HOST.replace(/^ws/, 'http');
-  const res = await fetch(`${httpBase}${path}${path.includes('?') ? '&' : '?'}${qs().slice(1)}`, {
-    ...opts,
-    headers: { 'content-type': 'application/json' },
-  });
+  let res;
+  try {
+    res = await fetchTimeout(`${httpBase}${path}${path.includes('?') ? '&' : '?'}${qs().slice(1)}`, {
+      ...opts,
+      headers: { 'content-type': 'application/json' },
+    });
+  } catch (e) {
+    throw new Error(friendlyApiError(e, path));
+  }
   if (!res.ok && res.status !== 200) {
     throw new Error(`${res.status} ${await res.text()}`);
   }
@@ -71,8 +94,14 @@ if (args[0] === 'relay') {
     else { console.error('no relay found — start one with: tailbrowser relay'); process.exit(1); }
   }
 } else {
-  // every other command talks to a relay: resolve first (env → cache → scan)
-  const { host, source } = await resolveHost({ log: console.error });
+  // every other command talks to a relay: resolve first (env → cache → scan).
+  // A cached-but-dead relay is re-discovers live instead of erroring out.
+  let host, source;
+  try {
+    ({ host, source } = await resolveHost({ log: console.error, rediscover: true }));
+  } catch (e) {
+    console.error(`✗ ${e.message}`); process.exit(1);
+  }
   HOST = host;
   if (source !== 'env') console.error(`→ relay ${host} (${source})`);
   if (eIdx !== -1) {
@@ -83,17 +112,28 @@ if (args[0] === 'relay') {
     if (!sessionId) {
       const cfg = loadConfig();
       if (wantNew || !cfg.defaultSession) {
-        const r = await api('/session', { method: 'POST' });
-        sessionId = r.sessionId;
-        saveConfig({ ...cfg, defaultSession: sessionId });
-        console.error(`→ session ${sessionId} (new default, saved)`);
+        try {
+          const r = await api('/session', { method: 'POST' });
+          sessionId = r.sessionId;
+          saveConfig({ ...cfg, defaultSession: sessionId });
+          console.error(`→ session ${sessionId} (new default, saved)`);
+        } catch (e) {
+          console.error(`✗ ${e.message}`);
+          process.exit(1);
+        }
       } else {
         sessionId = cfg.defaultSession;
       }
     }
     if (!code) { console.error('usage: tailbrowser -s <id> -e <code>'); process.exit(1); }
-    await execute(sessionId, code);
+    try {
+      await execute(sessionId, code);
+    } catch (e) {
+      console.error(`✗ ${e.message}`);
+      process.exit(1);
+    }
   } else if (args[0] === 'session') {
+    try {
     if (args[1] === 'new') {
       const r = await api('/session', { method: 'POST' });
       console.log(r.sessionId);
@@ -107,10 +147,16 @@ if (args[0] === 'relay') {
     } else {
       console.error('usage: tailbrowser session new|list|reset <id>'); process.exit(1);
     }
+    } catch (e) {
+      console.error(`✗ ${e.message}`);
+      process.exit(1);
+    }
   } else if (args[0] === 'scope') {
-    console.log(JSON.stringify(await api('/scope'), null, 2));
+    try { console.log(JSON.stringify(await api('/scope'), null, 2)); }
+    catch (e) { console.error(`✗ ${e.message}`); process.exit(1); }
   } else if (args[0] === 'health') {
-    console.log(JSON.stringify(await api('/health'), null, 2));
+    try { console.log(JSON.stringify(await api('/health'), null, 2)); }
+    catch (e) { console.error(`✗ ${e.message}`); process.exit(1); }
   } else {
     console.log(`tailbrowser — let agents control a tailnet Chrome
 relay discovery: TAILBROWSER_HOST env → ~/.tailbrowser/config.json → scan tailnet (tailscale status)

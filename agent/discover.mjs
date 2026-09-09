@@ -162,7 +162,7 @@ export async function discover({ port = Number(process.env.TAILBROWSER_PORT || D
   return null;
 }
 
-export async function resolveHost({ force = false, log = () => {} } = {}) {
+export async function resolveHost({ force = false, rediscover = false, log = () => {} } = {}) {
   if (process.env.TAILBROWSER_HOST) {
     return { host: process.env.TAILBROWSER_HOST, source: 'env' };
   }
@@ -177,5 +177,11 @@ export async function resolveHost({ force = false, log = () => {} } = {}) {
   }
   const found = await discover({ log });
   if (found) return { host: found, source: 'discovered' };
+  // nothing live on the tailnet: fall back to the stale cache rather than
+  // localhost (localhost is almost always wrong for remote agents), but say so
+  if (rediscover && cache?.host) {
+    log(`no live relay found — falling back to last known ${cache.host}`);
+    return { host: cache.host, source: 'stale-cache' };
+  }
   return { host: `ws://127.0.0.1:${DEFAULT_PORT}`, source: 'default' };
 }
