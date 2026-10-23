@@ -2,43 +2,185 @@
 <html>
 <head>
   <meta charset="utf-8">
+  <title>tailbrowser</title>
   <style>
-    body { width: 340px; font: 13px/1.45 system-ui, sans-serif; margin: 10px; color: #111; }
-    h1 { font-size: 14px; margin: 0 0 8px; }
-    .row { display: flex; gap: 6px; margin: 6px 0; align-items: center; }
-    label { flex: 0 0 92px; }
-    input[type=text] { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; }
-    select { padding: 4px; }
-    .muted { color: #666; font-size: 11.5px; }
-    .ok { color: #1a9f47; font-weight: 600; }
-    .bad { color: #c0392b; font-weight: 600; }
-    #tabs { margin: 8px 0; max-height: 140px; overflow: auto; }
-    .tab { display: flex; gap: 6px; align-items: center; padding: 3px 0; border-bottom: 1px solid #eee; }
-    .tab .u { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    button { padding: 4px 8px; cursor: pointer; }
-    #save { background: #1a73e8; color: #fff; border: 0; border-radius: 4px; padding: 6px 12px; }
-    #revoke { background: #c0392b; color: #fff; border: 0; border-radius: 4px; padding: 6px 12px; width: 100%; margin-top: 8px; }
-    .hidden { display: none; }
+    :root {
+      --bg: #ffffff;
+      --surface: #f5f6f8;
+      --border: #e2e4e9;
+      --text: #15171a;
+      --muted: #6b7280;
+      --accent: #1a73e8;
+      --accent-text: #ffffff;
+      --ok: #1a9f47;
+      --ok-soft: #e6f5ec;
+      --warn: #b7791f;
+      --warn-soft: #fdf3e1;
+      --danger: #c0392b;
+      --danger-soft: #fbe9e7;
+      --idle: #8a919c;
+      --idle-soft: #eef0f3;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1b1d21;
+        --surface: #24272c;
+        --border: #34383f;
+        --text: #e8eaed;
+        --muted: #9aa0a6;
+        --accent: #8ab4f8;
+        --accent-text: #0b1b33;
+        --ok: #5cc884;
+        --ok-soft: #1d3326;
+        --warn: #e8b04b;
+        --warn-soft: #3a2f1a;
+        --danger: #f28b82;
+        --danger-soft: #3d2120;
+        --idle: #9aa0a6;
+        --idle-soft: #2c2f35;
+      }
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      width: 360px; margin: 0; padding: 14px;
+      font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--bg); color: var(--text);
+    }
+    h2 { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+    section { margin-top: 14px; }
+    .hidden { display: none !important; }
+    .muted { color: var(--muted); }
+    .small { font-size: 11.5px; }
+
+    /* header */
+    header { display: flex; align-items: center; gap: 8px; }
+    .logo { width: 22px; height: 22px; border-radius: 6px; background: var(--accent); color: var(--accent-text); display: grid; place-items: center; font-weight: 700; font-size: 12px; }
+    .brand { font-weight: 650; font-size: 14px; flex: 1; }
+    .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: var(--idle-soft); color: var(--idle); }
+    .pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .pill[data-state="connected"] { background: var(--ok-soft); color: var(--ok); }
+    .pill[data-state="connecting"] { background: var(--warn-soft); color: var(--warn); }
+    .pill[data-state="revoked"] { background: var(--danger-soft); color: var(--danger); }
+    #subline { margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .notice { margin-top: 10px; padding: 8px 10px; border-radius: 8px; font-size: 12px; background: var(--danger-soft); color: var(--danger); }
+    .notice.info { background: var(--warn-soft); color: var(--warn); }
+
+    /* cards & rows */
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+    .tab-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .tab-row + .tab-row { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+    .favicon { width: 16px; height: 16px; flex: 0 0 16px; border-radius: 3px; background: var(--border); object-fit: contain; }
+    .tab-text { flex: 1; min-width: 0; }
+    .tab-title, .tab-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tab-title { font-weight: 550; }
+    .tab-url { font-size: 11.5px; color: var(--muted); }
+    .badge { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: var(--idle-soft); color: var(--idle); white-space: nowrap; }
+    .badge.on { background: var(--ok-soft); color: var(--ok); }
+    #currentHint { margin-top: 8px; }
+
+    /* scope segmented control */
+    .segmented { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 3px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; }
+    .segmented button { border: 0; background: transparent; color: var(--text); padding: 6px 4px; border-radius: 7px; font: inherit; font-weight: 550; cursor: pointer; }
+    .segmented button[aria-pressed="true"] { background: var(--bg); box-shadow: 0 1px 2px rgba(0,0,0,.15); }
+    #scopeHelp { margin-top: 6px; }
+
+    /* form controls */
+    label { display: block; font-size: 12px; font-weight: 550; margin: 8px 0 4px; }
+    input, textarea {
+      width: 100%; padding: 6px 8px; border-radius: 7px; border: 1px solid var(--border);
+      background: var(--bg); color: var(--text); font: inherit;
+    }
+    textarea { resize: vertical; min-height: 54px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+    .actions { display: flex; gap: 6px; margin-top: 10px; }
+    button.btn { padding: 6px 12px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; font-weight: 550; cursor: pointer; }
+    button.btn:hover { background: var(--surface); }
+    button.btn:disabled { opacity: .6; cursor: default; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+    button.primary:hover { background: var(--accent); filter: brightness(1.08); }
+    footer button.btn { width: 100%; }
+    button.danger { border-color: var(--danger); color: var(--danger); }
+    button.danger:hover { background: var(--danger-soft); }
+    button.link { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; font-size: 11.5px; cursor: pointer; }
+    button.small-btn { padding: 3px 9px; font-size: 12px; }
+
+    details > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; }
+    details > summary::-webkit-details-marker { display: none; }
+    details > summary h2 { margin: 0; }
+    details > summary::after { content: "▸"; color: var(--muted); font-size: 10px; }
+    details[open] > summary::after { content: "▾"; }
+    #tokenRow { display: flex; justify-content: space-between; align-items: baseline; }
+    footer { margin-top: 16px; }
   </style>
 </head>
 <body>
-  <h1>tailbrowser</h1>
-  <div id="status" class="muted">checking…</div>
-  <div id="keepalive" class="muted" style="font-size:11px;margin:2px 0 4px;">keep-alive: —</div>
-  <div class="row"><label>Relay</label><input type="text" id="relay"></div>
-  <div class="row"><label>Token</label><input type="text" id="token" placeholder="optional — leave blank if relay runs tokenless"></div>
-  <div class="row"><label>Scope</label>
-    <select id="scope">
-      <option value="tab">Tabs I pick</option>
-      <option value="allowlist">URL allowlist</option>
-      <option value="full">Entire browser</option>
-    </select>
-  </div>
-  <div id="allowRow" class="row hidden"><label>Allowlist</label><input type="text" id="allowlist" placeholder="https://example.com/*"></div>
-  <div class="row"><button id="save">Save &amp; connect</button><button id="discover">Discover</button><button id="optin">Opt in this tab</button></div>
-  <div class="muted">Attached tabs:</div>
-  <div id="tabs"></div>
-  <button id="revoke">Disconnect agent (revoke)</button>
+  <header>
+    <div class="logo" aria-hidden="true">tb</div>
+    <div class="brand">tailbrowser</div>
+    <span id="statePill" class="pill" data-state="setup">…</span>
+  </header>
+  <div id="subline" class="muted small">&nbsp;</div>
+  <div id="notice" class="notice hidden" role="alert"></div>
+
+  <section id="currentSection">
+    <h2>This tab</h2>
+    <div class="card">
+      <div class="tab-row">
+        <img id="currentIcon" class="favicon" alt="">
+        <div class="tab-text">
+          <div id="currentTitle" class="tab-title">—</div>
+          <div id="currentUrl" class="tab-url"></div>
+        </div>
+        <span id="currentBadge" class="badge">Not shared</span>
+      </div>
+      <div id="currentHint" class="muted small hidden"></div>
+      <div class="actions"><button id="currentAction" class="btn primary small-btn">Share with agents</button></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Agent access</h2>
+    <div class="segmented" role="group" aria-label="Scope">
+      <button data-scope="tab" aria-pressed="false">Tabs I pick</button>
+      <button data-scope="allowlist" aria-pressed="false">Allowlist</button>
+      <button data-scope="full" aria-pressed="false">Entire browser</button>
+    </div>
+    <div id="scopeHelp" class="muted small"></div>
+    <div id="allowlistBox" class="hidden">
+      <label for="allowlist">URL patterns (one per line, <code>*</code> wildcard)</label>
+      <textarea id="allowlist" placeholder="https://app.example.com/*"></textarea>
+      <div class="actions"><button id="saveAllowlist" class="btn small-btn">Apply allowlist</button></div>
+    </div>
+  </section>
+
+  <section id="sharedSection">
+    <h2>Shared tabs <span id="sharedCount" class="muted"></span></h2>
+    <div id="sharedTabs" class="card"></div>
+  </section>
+
+  <section>
+    <details id="relaySettings">
+      <summary><h2>Relay connection</h2></summary>
+      <label for="relay">Relay URL</label>
+      <input type="text" id="relay" placeholder="ws://100.x.y.z:8787" spellcheck="false" autocomplete="off">
+      <div id="tokenRow">
+        <label for="token">Token</label>
+        <button id="clearToken" class="link hidden" type="button">Clear saved token</button>
+      </div>
+      <input type="password" id="token" placeholder="Optional — leave blank if the relay is tokenless" autocomplete="off">
+      <div class="actions">
+        <button id="save" class="btn primary">Save &amp; connect</button>
+        <button id="discover" class="btn">Find relay on this machine</button>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    <button id="revoke" class="btn danger">Disconnect agent (revoke access)</button>
+  </footer>
+
   <script src="popup.js"></script>
 </body>
 </html>
