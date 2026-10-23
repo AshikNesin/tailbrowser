@@ -35,3 +35,9 @@ for (const { size, master } of OUTPUTS) {
   console.log(`  ${path.relative(process.cwd(), out)}  (${master})`);
 }
 await browser.close();
+
+// the website (docs/) serves its own copies
+const site = path.resolve(ICONS, '../../docs/assets');
+fs.mkdirSync(site, { recursive: true });
+for (const f of ['icon.svg', 'icon-32.png']) fs.copyFileSync(path.join(ICONS, f), path.join(site, f));
+console.log(`  copied icon.svg, icon-32.png to ${path.relative(process.cwd(), site)}`);

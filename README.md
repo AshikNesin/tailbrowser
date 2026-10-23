@@ -124,6 +124,8 @@ npm run build:icons       # make the PNG icons from the SVG files in extension/i
 npm run video             # capture real footage, then render media/tailbrowser.mp4
 ```
 
+The product website is in `docs/`. It is one static page with no build step. To publish it with GitHub Pages, select the `/docs` folder in the repository settings. `npm run video` and `npm run build:icons` update the files in `docs/assets/`.
+
 `agent/fake-extension.mjs` simulates the extension with a real headless Chromium. This lets you test the relay without a Chrome window.
 
 The tests find Chromium through `CHROME_BIN` or the Playwright browser cache (`PLAYWRIGHT_BROWSERS_PATH`). For `test:extension`, you must have a full Chromium build. The headless shell cannot load extensions.
@@ -149,6 +151,8 @@ agent/
   fake-extension.mjs   test replacement for the extension
 lib/                   functions that the relay and the agent both use
 extension/             MV3 extension: service worker, popup, keep-alive document, icons
+docs/                  product website (static, for GitHub Pages)
+media/                 product video and the files that make it
 ```
 
 ## Stability
