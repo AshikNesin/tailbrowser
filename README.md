@@ -68,6 +68,7 @@ tailbrowser scope | health
 npm test                  # stability regression suite (relay + fake extension + headless Chromium)
 npm run test:extension    # loads the REAL extension into Chromium and drives it end-to-end
 npm run smoke             # quick Playwright demo through relay + fake extension
+npm run build:icons       # re-render extension/icons/*.png from the SVG masters
 ```
 `agent/fake-extension.mjs` simulates the extension against real headless Chromium, so the relay can be tested without a GUI Chrome. The tests find Chromium via `CHROME_BIN` or Playwright's browser cache (`PLAYWRIGHT_BROWSERS_PATH`); `test:extension` needs a full Chromium build (the headless shell can't load extensions).
 
@@ -87,7 +88,7 @@ agent/
   discover.mjs         relay discovery (env → cache → tailnet scan)    config.mjs  ~/.tailbrowser/config.json
   index.mjs            programmatic API    fake-extension.mjs  test double for the extension
 lib/                   helpers shared by relay and agent (flags, errors, tailscale CLI, chromium lookup)
-extension/             MV3 extension: background.js (service worker), popup, offscreen keep-alive
+extension/             MV3 extension: background.js (service worker), popup, offscreen keep-alive, icons/ (SVG masters + PNGs)
 ```
 
 ## Stability model (what keeps it up)

@@ -23,7 +23,8 @@
     "test": "node scripts/stability-test.mjs",
     "test:extension": "node scripts/extension-test.mjs",
     "smoke": "bash scripts/smoke.sh",
-    "stability": "node scripts/stability-test.mjs"
+    "stability": "node scripts/stability-test.mjs",
+    "build:icons": "node scripts/build-icons.mjs"
   },
   "keywords": [
     "tailscale",
