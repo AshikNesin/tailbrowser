@@ -5,9 +5,10 @@
 import { chromium } from 'playwright-core';
 
 const HOST = process.env.TAILBROWSER_HOST || 'ws://127.0.0.1:8787';
+const TOKEN = process.env.TAILBROWSER_TOKEN || '';
 const QUERY = process.argv[2] || 'Ashik Nesin';
 
-const browser = await chromium.connectOverCDP(`${HOST}/cdp/1`);
+const browser = await chromium.connectOverCDP(`${HOST}/cdp/1${TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ''}`);
 const ctx = browser.contexts()[0];
 const pages = ctx.pages();
 console.log('pages visible to agent:', pages.length, pages.map(p => p.url().slice(0, 60)));
@@ -35,7 +36,7 @@ if (results.length) {
 }
 
 // consent page? (EU) — detect and report
-if (/before you continue to google/i.test(await page.textContent('body').catch(() => '') || '')) {
+if (/before you continue to google/i.test((await page.textContent('body').catch(() => '')) || '')) {
   console.log('⚠ Google consent wall detected — click "Accept" once on the Mac mini, then rerun.');
 }
 

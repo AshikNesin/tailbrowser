@@ -1,7 +1,7 @@
 {
   "name": "tailbrowser",
   "version": "0.3.0",
-  "description": "Let AI agents control your real Chrome over your tailnet \u2014 scoped to pages you allow or the whole browser",
+  "description": "Let AI agents control your real Chrome over your tailnet — scoped to pages you allow or the whole browser",
   "type": "module",
   "bin": {
     "tailbrowser": "./agent/tailbrowser.mjs"
@@ -13,12 +13,15 @@
   },
   "files": [
     "agent/",
+    "lib/",
     "relay/",
     "extension/",
     "README.md"
   ],
   "scripts": {
     "start:relay": "node relay/relay.mjs",
+    "test": "node scripts/stability-test.mjs",
+    "test:extension": "node scripts/extension-test.mjs",
     "smoke": "bash scripts/smoke.sh",
     "stability": "node scripts/stability-test.mjs"
   },

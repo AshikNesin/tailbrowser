@@ -1,25 +1,19 @@
 #!/usr/bin/env node
-// tailbrowser MCP server (M1) — stdio, single `execute` tool with sticky session.
-// Config: TAILBROWSER_HOST (default ws://127.0.0.1:8787), TAILBROWSER_TOKEN (optional)
+// tailbrowser MCP server — stdio JSON-RPC, single `execute` tool with sticky sessions.
+// Config: TAILBROWSER_HOST (overrides discovery), TAILBROWSER_TOKEN (optional)
 // Register (Claude Code / Cursor):
 //   { "mcpServers": { "tailbrowser": { "command": "node", "args": ["/path/to/agent/tailbrowser.mcp.mjs"] } } }
+// stdout carries the protocol — all diagnostics go to stderr.
 
 import readline from 'node:readline';
+import { createRequire } from 'node:module';
 import { resolveHost } from './discover.mjs';
+import { createClient } from './client.mjs';
 
-let HOST = null;
-const TOKEN = process.env.TAILBROWSER_TOKEN || '';
-const httpBase = () => HOST.replace(/^ws/, 'http');
-const FETCH_TIMEOUT_MS = 15_000;
+const { version } = createRequire(import.meta.url)('../package.json');
+const PROTOCOL_VERSION = '2024-11-05';
 
-function describeFetchError(e) {
-  const s = String((e && (e.cause?.code || e.code || e.message)) || e || 'unknown');
-  if (/ECONNREFUSED/i.test(s)) return `relay not reachable at ${HOST} (connection refused) — is it running? (tailbrowser relay) / extension connected? (check popup) — verify: curl -m 5 ${httpBase()}/health`;
-  if (/abort|AbortError|timeout|ETIMEDOUT/i.test(s)) return `relay ${HOST} timed out — black-holed address? verify: curl -m 5 ${httpBase()}/health`;
-  return s;
-}
-
-const TOOL = {
+const EXECUTE_TOOL = {
   name: 'execute',
   description: `Run a JavaScript snippet in a stateful Playwright session against the user's REAL Chrome (on their tailnet, via tailbrowser relay). Full Playwright Page API.
 In scope: page (current Page), context, state (object persisted across calls within a session), pages() (all agent-visible tabs), snapshot({page}) (YAML aria snapshot), screenshot({page}) (base64 png), newPage().
@@ -40,64 +34,77 @@ Rules: NEVER call browser.close() (it would close the user's Chrome). Store anyt
   },
 };
 
-const rl = readline.createInterface({ input: process.stdin, terminal: false });
+let client = null;
 
-function send(obj) {
-  process.stdout.write(JSON.stringify(obj) + '\n');
-}
-
-async function callExecute({ code, sessionId }) {
-  if (!HOST) {
+async function getClient() {
+  if (!client) {
     const { host, source } = await resolveHost({ log: console.error });
-    HOST = host;
     console.error(`[tailbrowser] relay ${host} (${source})`);
+    client = createClient({ host });
   }
-  const body = { code };
-  if (sessionId) body.sessionId = sessionId;
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS + 105_000); // snippets can take up to 120s
-  try {
-    const res = await fetch(`${httpBase()}/execute${TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ''}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: ac.signal,
-    });
-    return await res.json();
-  } catch (e) {
-    return { ok: false, error: describeFetchError(e), sessionId: sessionId || '1' };
-  } finally { clearTimeout(t); }
+  return client;
 }
 
-rl.on('line', (line) => {
-  line = line.trim();
-  if (!line) return;
+const toolResult = (text, isError) => ({ content: [{ type: 'text', text }], isError });
+
+async function callExecute({ code, sessionId } = {}) {
+  if (typeof code !== 'string' || !code) return toolResult('[error] missing "code" string', true);
+  let r;
+  try {
+    r = await (await getClient()).execute(code, sessionId);
+  } catch (e) {
+    if (e.network) client = null; // relay moved or restarted elsewhere: re-resolve on the next call
+    return toolResult(`[error] ${e.message}`, true);
+  }
+  const lines = (r.logs || []).map((l) => `[log] ${l}`);
+  lines.push(r.ok
+    ? `[result] ${typeof r.result === 'string' ? r.result : JSON.stringify(r.result, null, 2)}`
+    : `[error] ${r.error}`);
+  lines.push(`[session] ${r.sessionId}`);
+  return toolResult(lines.join('\n'), !r.ok);
+}
+
+class RpcError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+}
+
+const handlers = {
+  initialize: () => ({
+    protocolVersion: PROTOCOL_VERSION,
+    capabilities: { tools: {} },
+    serverInfo: { name: 'tailbrowser', version },
+  }),
+  ping: () => ({}),
+  'tools/list': () => ({ tools: [EXECUTE_TOOL] }),
+  'tools/call': (params) => {
+    if (params?.name !== EXECUTE_TOOL.name) throw new RpcError(-32602, `unknown tool: ${params?.name}`);
+    return callExecute(params.arguments);
+  },
+};
+
+const send = (obj) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...obj }) + '\n');
+
+async function handleLine(line) {
+  if (!line.trim()) return;
   let msg;
-  try { msg = JSON.parse(line); } catch { return; }
-  (async () => {
-    if (msg.method === 'initialize') {
-      return send({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'tailbrowser', version: '0.3.0' } } });
-    }
-    if (msg.method === 'notifications/initialized') return;
-    if (msg.method === 'ping') return send({ jsonrpc: '2.0', id: msg.id, result: {} });
-    if (msg.method === 'tools/list') {
-      return send({ jsonrpc: '2.0', id: msg.id, result: { tools: [TOOL] } });
-    }
-    if (msg.method === 'tools/call' && msg.params?.name === 'execute') {
-      try {
-        const r = await callExecute(msg.params.arguments || {});
-        const text = [
-          ...(r.logs || []).map((l) => `[log] ${l}`),
-          r.ok ? `[result] ${typeof r.result === 'string' ? r.result : JSON.stringify(r.result, null, 2)}` : `[error] ${r.error}`,
-          `[session] ${r.sessionId}`,
-        ].join('\n');
-        return send({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text }], isError: !r.ok } });
-      } catch (e) {
-        return send({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: String(e.message || e) }], isError: true } });
-      }
-    }
-    if (msg.id) send({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'method not found: ' + msg.method } });
-  })().catch((e) => {
-    if (msg.id) send({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: String(e.message || e) } });
-  });
-});
+  try { msg = JSON.parse(line); } catch {
+    return send({ id: null, error: { code: -32700, message: 'parse error' } });
+  }
+  const isRequest = msg.id !== undefined && msg.id !== null; // notifications get no reply
+  const handler = handlers[msg.method];
+  if (!handler) {
+    if (isRequest) send({ id: msg.id, error: { code: -32601, message: `method not found: ${msg.method}` } });
+    return;
+  }
+  try {
+    const result = await handler(msg.params);
+    if (isRequest) send({ id: msg.id, result });
+  } catch (e) {
+    if (isRequest) send({ id: msg.id, error: { code: e instanceof RpcError ? e.code : -32603, message: e.message || String(e) } });
+  }
+}
+
+readline.createInterface({ input: process.stdin, terminal: false }).on('line', handleLine);
