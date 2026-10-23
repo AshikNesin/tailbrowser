@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
   <!-- tailbrowser icon (48px and up): an agent's cursor gliding into a browser
-       window, trailing a dotted "tail" — remote control over the tailnet.
+       window, trailing a dotted "tail": remote control over the tailnet.
        Colors follow Tailscale's palette: warm near-black, warm off-white,
        warm grays, and a muted take on their brick-red accent (#d04841)
        for the one thing that acts.

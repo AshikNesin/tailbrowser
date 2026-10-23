@@ -21,13 +21,13 @@ function describeNetworkError(e, host) {
   const kind = networkErrorKind(e);
   switch (kind) {
     case 'connection refused':
-      return `relay not reachable at ${host} (connection refused) — is it running? Start it with: tailbrowser relay  (or check TAILBROWSER_HOST)`;
+      return `relay not reachable at ${host} (connection refused). Is it running? Start it with: tailbrowser relay  (or check TAILBROWSER_HOST)`;
     case 'network unreachable':
-      return `relay ${host} unreachable at network level — VPN/proxy intercepting the tailnet range?`;
+      return `relay ${host} unreachable at network level. Is a VPN/proxy intercepting the tailnet range?`;
     case 'timeout':
-      return `relay ${host} timed out — black-holed address? verify: curl -m 5 ${toHttpBase(host)}/health`;
+      return `relay ${host} timed out. Black-holed address? Verify: curl -m 5 ${toHttpBase(host)}/health`;
     case 'DNS failure':
-      return `cannot resolve relay host ${host} (DNS) — check TAILBROWSER_HOST`;
+      return `cannot resolve relay host ${host} (DNS); check TAILBROWSER_HOST`;
     default:
       return `relay ${host}: ${kind}`;
   }
@@ -52,9 +52,9 @@ export function createClient({ host, token = process.env.TAILBROWSER_TOKEN || ''
     }
     let data = null;
     try { data = JSON.parse(text); } catch {}
-    if (res.status === 401) throw new RelayError(`relay ${host} rejected the token — set TAILBROWSER_TOKEN to the relay's --token`, { status: 401 });
+    if (res.status === 401) throw new RelayError(`relay ${host} rejected the token; set TAILBROWSER_TOKEN to the relay's --token`, { status: 401 });
     if (!res.ok) throw new RelayError(`relay ${host} answered HTTP ${res.status} on ${path}: ${data?.error || text}`, { status: res.status });
-    if (data === null) throw new RelayError(`relay ${host} sent a non-JSON answer on ${path} — is that a tailbrowser relay?`);
+    if (data === null) throw new RelayError(`relay ${host} sent a non-JSON answer on ${path}. Is that a tailbrowser relay?`);
     return data;
   }
 

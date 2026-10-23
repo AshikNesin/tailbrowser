@@ -1,9 +1,9 @@
-// tailbrowser offscreen document — keepalive companion for the MV3 service worker.
+// tailbrowser offscreen document: keepalive companion for the MV3 service worker.
 //
 // Chrome kills MV3 service workers ~30s after their last event, and since
 // Chrome 116 WebSocket traffic no longer counts as an event. An offscreen
 // document is never throttled, so it can hold a long-lived runtime.Port whose
-// every message resets the worker's idle timer — keeping the worker (and its
+// every message resets the worker's idle timer, keeping the worker (and its
 // relay WebSocket) alive while Chrome is in the background.
 
 const PING_MS = 20_000;
@@ -20,7 +20,7 @@ function connect() {
     timer = setTimeout(connect, 1000);
     return;
   }
-  // worker restarted or died — reconnecting wakes it again
+  // worker restarted or died; reconnecting wakes it again
   port.onDisconnect.addListener(() => {
     port = null;
     clearTimeout(timer);

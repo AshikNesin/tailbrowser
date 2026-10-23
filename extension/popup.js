@@ -1,4 +1,4 @@
-// tailbrowser popup — connection status, sharing the current tab, scope and
+// tailbrowser popup: connection status, sharing the current tab, scope and
 // relay settings. Status live-refreshes every 2s; a form field is only synced
 // from the extension while the user isn't editing it, so a refresh never
 // overwrites what they are typing.
@@ -8,23 +8,23 @@ const $ = (id) => document.getElementById(id);
 const STATE_LABELS = { setup: 'Not set up', connecting: 'Connecting…', connected: 'Connected', revoked: 'Revoked' };
 const SCOPE_HELP = {
   tab: 'Agents see only the tabs you share from this popup.',
-  allowlist: 'Agents see tabs whose URL matches a pattern — attached automatically as you browse.',
+  allowlist: 'Agents see tabs whose URL matches a pattern, attached automatically as you browse.',
   full: 'Agents see every tab and can open and close tabs.',
 };
 const EMPTY_SHARED = {
-  tab: 'Nothing shared yet — use “Share with agents” above.',
+  tab: 'Nothing shared yet. Use “Share with agents” above.',
   allowlist: 'No open tab matches the allowlist.',
-  full: 'Waiting for the relay — tabs are shared once connected.',
+  full: 'Waiting for the relay. Tabs are shared once connected.',
 };
 
 let status = null;
 let currentTab = null;
 let firstRender = true;
-let actionError = null; // { text, until } — errors from button clicks outrank the background's lastError
+let actionError = null; // { text, until }; errors from button clicks outrank the background's lastError
 
 function call(t, extra = {}) {
   return chrome.runtime.sendMessage({ t, ...extra })
-    .then((r) => r ?? { ok: false, error: 'extension did not answer — try reopening the popup' })
+    .then((r) => r ?? { ok: false, error: 'extension did not answer; try reopening the popup' })
     .catch((e) => ({ ok: false, error: String(e.message || e) }));
 }
 
@@ -53,7 +53,7 @@ function setFavicon(img, url) {
 }
 
 function ago(ms) {
-  if (ms == null) return '—';
+  if (ms == null) return 'never';
   return ms < 1500 ? 'just now' : `${Math.round(ms / 1000)}s ago`;
 }
 
@@ -67,7 +67,7 @@ function renderHeader() {
   const ka = status.keepalive || {};
   $('subline').textContent = {
     setup: 'Enter your relay URL below to get started.',
-    revoked: 'Agent access revoked — nothing is shared.',
+    revoked: 'Agent access revoked. Nothing is shared.',
     connecting: `Trying ${status.relay}…`,
     connected: `${status.relay} · keep-alive ${ka.port ? '✓' : 'starting…'} · heard ${ago(ka.lastHeardAgoMs)}`,
   }[state] || '';
@@ -161,8 +161,8 @@ function renderSharedTabs() {
 function renderSettings() {
   $('clearToken').classList.toggle('hidden', !status.hasToken);
   $('token').placeholder = status.hasToken
-    ? 'Saved — leave blank to keep it'
-    : 'Optional — leave blank if the relay is tokenless';
+    ? 'Saved. Leave blank to keep it.'
+    : 'Optional; leave blank if the relay is tokenless';
 
   const revoke = $('revoke');
   revoke.classList.toggle('hidden', status.state === 'setup');

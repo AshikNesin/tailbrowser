@@ -1,5 +1,5 @@
 // HTTP API: session management, snippet execution and status endpoints.
-// Fault-isolated: nothing a client sends may throw past the handler — bad
+// Fault-isolated: nothing a client sends may throw past the handler: bad
 // input degrades to a 4xx/5xx answer, never a dead daemon.
 
 import { errorMessage } from '../lib/errors.mjs';
@@ -15,7 +15,7 @@ class HttpError extends Error {
   }
 }
 
-// bounded reader — a huge/mangled POST can't wedge or OOM us
+// bounded reader: a huge/mangled POST can't wedge or OOM us
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let size = 0;

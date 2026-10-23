@@ -1,5 +1,5 @@
 // Snippet sessions: isolated `state` per session, one shared Playwright
-// connection (through this relay's own /cdp endpoint) for all of them — tabs
+// connection (through this relay's own /cdp endpoint) for all of them. Tabs
 // are shared, state is not.
 
 import vm from 'node:vm';
@@ -105,7 +105,7 @@ export class SnippetRunner {
   async #getBrowser() {
     const generation = this.#extension.generation;
     if (this.#browser && this.#browserGeneration !== generation) {
-      log('extension generation changed — recycling cached Playwright connection');
+      log('extension generation changed, recycling cached Playwright connection');
       const stale = this.#browser;
       this.#browser = null;
       try { await stale.close(); } catch {} // closes only its ws to this relay
@@ -131,13 +131,13 @@ export class SnippetRunner {
     const fail = (e) => new SnippetError(errorMessage(e), logs);
 
     if (!this.#extension.connected) {
-      throw fail('TB_ERR: extension not connected — is the Chrome device up? (popup: relay status)');
+      throw fail('TB_ERR: extension not connected. Is the Chrome device up? (popup: relay status)');
     }
     let timer;
     try {
       const browser = await this.#getBrowser();
       const context = browser.contexts()[0];
-      if (!context) throw new Error('TB_ERR: no browser context — attach a tab first (or use full-browser mode)');
+      if (!context) throw new Error('TB_ERR: no browser context; attach a tab first (or use full-browser mode)');
 
       const scope = buildScope({ session, context, logs });
       const snippet = vm.runInNewContext(`(async (require, import_) => {\n${code}\n})`, scope, { timeout: SYNC_COMPILE_TIMEOUT_MS });
@@ -149,7 +149,7 @@ export class SnippetRunner {
       ]);
       return { result, logs };
     } catch (e) {
-      // anything can be thrown (`throw "x"`, `throw null`) — normalize it
+      // anything can be thrown (`throw "x"`, `throw null`), so normalize it
       throw fail(e);
     } finally {
       clearTimeout(timer);
@@ -178,7 +178,7 @@ function buildScope({ session, context, logs }) {
       if (stored && !stored.isClosed()) { try { if (stored.context() === context) return stored; } catch {} }
       const first = context.pages()[0];
       if (first) return first;
-      throw new Error('TB_ERR: no page available — opt in a tab in the extension popup, or set scope to Entire browser');
+      throw new Error('TB_ERR: no page available; opt in a tab in the extension popup, or set scope to Entire browser');
     },
     set(value) { session.page = value; },
     configurable: true,

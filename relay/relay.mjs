@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// tailbrowser relay — hardened for long-running unattended use.
+// tailbrowser relay, hardened for long-running unattended use.
 //   /extension          the Chrome extension connects here (JSON envelopes)   → extension-link.mjs
 //   /cdp/:label         Playwright/CDP clients connect here (raw CDP)          → cdp-bridge.mjs
 //   /session /execute   HTTP session + snippet management                      → http-api.mjs, sandbox.mjs
 //   /health /scope /json/version
 //
 // Stability rules:
-//   1. No request, socket message, or snippet can kill the process — every
+//   1. No request, socket message, or snippet can kill the process; every
 //      entry point is fault-isolated (bad JSON -> 400, bad envelope -> drop).
 //   2. The relay is the long-lived piece; browsers/extensions flap, it must not.
 //   3. Fail fast + loudly: agents get typed TB_ERR/TB_TIMEOUT errors, the log
@@ -33,12 +33,12 @@ try {
 const { port, bind, token, allowList } = config;
 
 if (config.bindSource === 'tailscale') console.log('[relay] auto-detected tailscale IP:', bind);
-if (config.bindSource === 'loopback') console.log('[relay] no tailscale IP found — binding loopback. Pass --bind <ip> or install the tailscale CLI.');
+if (config.bindSource === 'loopback') console.log('[relay] no tailscale IP found, binding loopback. Pass --bind <ip> or install the tailscale CLI.');
 if (!token) console.log('[relay] tokenless mode: tailnet membership is the only gate (fine for a personal tailnet)');
 
 // ---------- process-level safety net ----------
 // The relay is a daemon: a surprise exception must never take it down. Log
-// loudly and keep serving — there is no corruptible state a restart would fix.
+// loudly and keep serving; there is no corruptible state a restart would fix.
 process.on('uncaughtException', (e) => log('UNCAUGHT (survived):', e?.stack || e));
 process.on('unhandledRejection', (e) => log('UNHANDLED REJECTION (survived):', e?.stack || e));
 
@@ -48,7 +48,7 @@ process.on('unhandledRejection', (e) => log('UNHANDLED REJECTION (survived):', e
 let lastTick = Date.now();
 setInterval(() => {
   const drift = Date.now() - lastTick;
-  if (drift > 5000) log(`EVENT LOOP STALLED ${Math.round(drift / 1000)}s — a synchronous snippet is likely blocking the relay`);
+  if (drift > 5000) log(`EVENT LOOP STALLED ${Math.round(drift / 1000)}s: a synchronous snippet is likely blocking the relay`);
   lastTick = Date.now();
 }, 1000).unref();
 
@@ -92,7 +92,7 @@ server.on('upgrade', (req, socket, head) => {
 server.on('error', (e) => {
   if (e?.code === 'EADDRINUSE') {
     console.error(`\n  ✗ port ${port} is already in use on ${bind}.\n`);
-    console.error(`    A relay is probably already running — health-check it:  curl http://${selfHost(bind)}:${port}/health`);
+    console.error(`    A relay is probably already running. Health-check it:  curl http://${selfHost(bind)}:${port}/health`);
     console.error(`    If it should be dead:  lsof -ti :${port} | xargs kill\n`);
     process.exit(1);
   }
@@ -112,7 +112,7 @@ function printBanner() {
     row('tailbrowser relay is up'),
     rule('├', '┤'),
     row(`listening      ws://${bind}:${port}`),
-    row(`auth           ${token ? 'token (pass --token to agents)' : 'tokenless — tailnet membership is the gate'}`),
+    row(`auth           ${token ? 'token (pass --token to agents)' : 'tokenless (tailnet membership is the gate)'}`),
     row(`sources        ${allowList.length ? `allowlist ${allowList.join(',')}` : 'any tailnet device'}`),
     rule('├', '┤'),
     row('Extension popup (on the Chrome device):'),

@@ -1,4 +1,4 @@
-// /cdp/:label — speaks the raw CDP wire protocol to Playwright (or any CDP
+// /cdp/:label: speaks the raw CDP wire protocol to Playwright (or any CDP
 // client) and maps it onto the extension pipe.
 //
 // The relay synthesizes the browser-level session (Target.* domain) from the
@@ -165,7 +165,7 @@ export class CdpBridge {
       case 'Target.getTargets':
         return { targetInfos: ext.targets().map((t) => targetInfo(t)) };
       case 'Target.attachToTarget':
-        // real CDP returns { sessionId } — Playwright destructures it
+        // real CDP returns { sessionId }, which Playwright destructures
         return { sessionId: client.attach(this.#requireTarget(params.targetId)) };
       case 'Target.getTargetInfo':
         if (!params.targetId) return { targetInfo: BROWSER_TARGET_INFO };

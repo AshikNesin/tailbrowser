@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// fake-extension.mjs — simulates the real extension for local testing.
+// fake-extension.mjs: simulates the real extension for local testing.
 // Talks the same /extension envelope protocol as extension/background.js,
 // but instead of chrome.debugger it drives a REAL headless Chromium over CDP
 // (launched with --remote-debugging-port). This validates the whole
@@ -172,7 +172,7 @@ async function closeTab(targetId) {
 async function createTab(params) {
   // Mirror the real extension: create, attach, ADVERTISE, then answer with
   // the real CDP targetId. The attachedToTarget event can arrive BEFORE the
-  // createTarget response — listen first or we miss it (classic CDP race).
+  // createTarget response, so listen first or we miss it (classic CDP race).
   const url = params?.url || 'about:blank';
   const attachedEvent = browser.waitForEvent(isPageAttach, 8000);
   const { targetId } = await browser.send('Target.createTarget', { ...params, url });
@@ -204,7 +204,7 @@ connectRelay();
 // open the start URL so there's real content
 await browser.send('Page.enable', {}, initialSession);
 await browser.send('Page.navigate', { url: START_URL }, initialSession).catch((e) => log('initial nav', e.message));
-log('ready — target', initialTargetId, '→', START_URL);
+log('ready: target', initialTargetId, '→', START_URL);
 
 const shutdown = () => { try { browser.close(); proc.kill(); } catch {} process.exit(0); };
 process.on('SIGINT', shutdown);

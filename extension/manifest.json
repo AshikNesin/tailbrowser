@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "tailbrowser",
   "version": "0.3.0",
-  "description": "Let AI agents on your tailnet control this Chrome — scoped to pages you allow or the whole browser.",
+  "description": "Let AI agents on your tailnet control this Chrome, scoped to pages you allow or the whole browser.",
   "minimum_chrome_version": "116",
   "background": {
     "service_worker": "background.js"

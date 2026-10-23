@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// search-name.mjs — drive the user's REAL Chrome through the relay: google a name, read results.
+// search-name.mjs: drive the user's REAL Chrome through the relay: google a name, read results.
 // Usage: TAILBROWSER_HOST=ws://... node search-name.mjs ["Query"]
 
 import { chromium } from 'playwright-core';
@@ -12,7 +12,7 @@ const browser = await chromium.connectOverCDP(`${HOST}/cdp/1${TOKEN ? `?token=${
 const ctx = browser.contexts()[0];
 const pages = ctx.pages();
 console.log('pages visible to agent:', pages.length, pages.map(p => p.url().slice(0, 60)));
-if (!pages.length) { console.error('no attached targets — opt in a tab or use full-browser mode'); process.exit(1); }
+if (!pages.length) { console.error('no attached targets; opt in a tab or use full-browser mode'); process.exit(1); }
 
 const page = pages[0];
 await page.goto(`https://www.google.com/search?q=${encodeURIComponent(QUERY)}&num=10`, { timeout: 30000 });
@@ -35,9 +35,9 @@ if (results.length) {
   console.log('no <a><h3> results; page text:', body);
 }
 
-// consent page? (EU) — detect and report
+// consent page? (EU) Detect and report it.
 if (/before you continue to google/i.test((await page.textContent('body').catch(() => '')) || '')) {
-  console.log('⚠ Google consent wall detected — click "Accept" once on the Mac mini, then rerun.');
+  console.log('⚠ Google consent wall detected. Click "Accept" once on the Mac mini, then rerun.');
 }
 
 console.log('\nDONE');

@@ -80,7 +80,7 @@ export class ExtensionLink extends EventEmitter {
       if (Date.now() - conn.lastSeen > this.#deadAfterMs) {
         // half-open socket (extension machine slept, network dropped): kill
         // it so CDP clients fail fast instead of stalling on a dead pipe
-        log(`extension silent > ${Math.round(this.#deadAfterMs / 1000)}s — terminating half-open connection`);
+        log(`extension silent > ${Math.round(this.#deadAfterMs / 1000)}s, terminating half-open connection`);
         try { ws.terminate(); } catch {}
         return;
       }

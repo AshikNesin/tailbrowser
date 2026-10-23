@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// tailbrowser stability suite — regression tests for every failure mode that
+// tailbrowser stability suite: regression tests for every failure mode that
 // has actually taken the relay down or wedged agents in real use.
 // (Process control lives here on purpose: bash $! mis-pins background
 // pipelines, which once made this suite kill the wrong process and "fail".)
@@ -49,11 +49,11 @@ const waitExt = async (want = true) => {
   return false;
 };
 
-console.log(`— starting relay on :${PORT} (logs: ${LOGDIR})`);
+console.log(`▸ starting relay on :${PORT} (logs: ${LOGDIR})`);
 const relay = run('node', ['relay/relay.mjs', '--port', String(PORT), '--bind', '127.0.0.1'], 'relay.log');
 for (let i = 0; i < 20; i++) { if (await health()) break; await wait(500); }
 
-console.log('— 1. malformed inputs never kill the relay');
+console.log('▸ 1. malformed inputs never kill the relay');
 {
   const attempts = [
     ['POST', '/execute', '{invalid json!!'],
@@ -68,7 +68,7 @@ console.log('— 1. malformed inputs never kill the relay');
   (await health())?.ok ? ok('malformed/empty bodies isolated') : bad('malformed body killed the relay');
 }
 
-console.log('— 2. execute without extension → typed fast error');
+console.log('▸ 2. execute without extension → typed fast error');
 {
   const t0 = Date.now();
   const r = await post({ sessionId: 's1', code: 'return await page.title()' });
@@ -77,7 +77,7 @@ console.log('— 2. execute without extension → typed fast error');
     ? ok(`typed TB_ERR error (${ms}ms)`) : bad(`expected fast TB_ERR, got (${ms}ms): ${JSON.stringify(r)}`);
 }
 
-console.log('— 3. extension flap recovery (no relay restart)');
+console.log('▸ 3. extension flap recovery (no relay restart)');
 {
   const ext = startFakeExt('ext1.log');
   (await waitExt(true)) || bad('extension never connected');
@@ -101,7 +101,7 @@ console.log('— 3. extension flap recovery (no relay restart)');
   r.ok ? ok('recovers after flap (no relay restart)') : bad(`did not recover after flap: ${r.error}`);
 }
 
-console.log('— 4. newPage() end-to-end (full-browser mode)');
+console.log('▸ 4. newPage() end-to-end (full-browser mode)');
 {
   const r = await post({ sessionId: 's2', code: 'const p = await newPage(); await p.setContent("<h1>hi</h1>"); state.p2 = p; return await p.textContent("h1")' });
   r.ok && r.result === 'hi' ? ok('newPage() creates + returns a working page') : bad(`newPage failed: ${r.error || JSON.stringify(r.result)}`);
@@ -111,14 +111,14 @@ console.log('— 4. newPage() end-to-end (full-browser mode)');
   r3.ok && r3.result[1] === r3.result[0] - 1 ? ok('page.close() closes the tab') : bad(`page.close: ${r3.error || JSON.stringify(r3.result)}`);
 }
 
-console.log('— 5. concurrent load (8 parallel snippets)');
+console.log('▸ 5. concurrent load (8 parallel snippets)');
 {
   const rs = await Promise.all(Array.from({ length: 8 }, (_, i) =>
     post({ sessionId: `c${i}`, code: 'await page.setContent("<b>x</b>"); return 1' })));
-  rs.every((r) => r.ok) ? ok('8/8 concurrent snippets') : bad(`only ${rs.filter((r) => r.ok).length}/8 ok — ${rs.find((r) => !r.ok)?.error}`);
+  rs.every((r) => r.ok) ? ok('8/8 concurrent snippets') : bad(`only ${rs.filter((r) => r.ok).length}/8 ok: ${rs.find((r) => !r.ok)?.error}`);
 }
 
-console.log('— 6. relay survives garbage WS frames');
+console.log('▸ 6. relay survives garbage WS frames');
 {
   const code = `
     const WebSocket = (await import('ws')).default;
@@ -137,9 +137,9 @@ console.log('— 6. relay survives garbage WS frames');
   (await health())?.ok ? ok('garbage extension frames isolated') : bad('garbage frames hurt relay');
 }
 
-console.log('— 7. session survives a throwing snippet (state not poisoned)');
+console.log('▸ 7. session survives a throwing snippet (state not poisoned)');
 {
-  // needs a live extension — restart one if section 3 left it down
+  // needs a live extension; restart one if section 3 left it down
   if (!(await health())?.extension) {
     startFakeExt('ext3.log');
     (await waitExt(true)) || bad('extension did not come back for section 7');
@@ -153,7 +153,7 @@ console.log('— 7. session survives a throwing snippet (state not poisoned)');
     ? ok('non-Error throw reported as-is, logs kept') : bad(`non-Error throw: ${JSON.stringify(r3)}`);
 }
 
-console.log('— 7b. auto-assigned session ids never collide with client-chosen ones');
+console.log('▸ 7b. auto-assigned session ids never collide with client-chosen ones');
 {
   const a = await post({}, BASE, '/session');
   const claimed = String(Number(a.sessionId) + 1);
@@ -162,7 +162,7 @@ console.log('— 7b. auto-assigned session ids never collide with client-chosen 
   b.sessionId && b.sessionId !== claimed ? ok(`POST /session skips claimed id ${claimed}`) : bad(`session id collision: ${JSON.stringify(b)}`);
 }
 
-console.log('— 7c. MCP server: JSON-RPC edge cases');
+console.log('▸ 7c. MCP server: JSON-RPC edge cases');
 {
   const mcp = spawn('node', ['agent/tailbrowser.mcp.mjs'], { cwd: ROOT, env: { ...process.env, TAILBROWSER_HOST: `ws://127.0.0.1:${PORT}` }, stdio: ['pipe', 'pipe', 'ignore'] });
   procs.push(mcp);
@@ -188,7 +188,7 @@ console.log('— 7c. MCP server: JSON-RPC edge cases');
   mcp.kill();
 }
 
-console.log('— 8. second relay on same port → friendly EADDRINUSE');
+console.log('▸ 8. second relay on same port → friendly EADDRINUSE');
 {
   const p = spawn('node', ['relay/relay.mjs', '--port', String(PORT), '--bind', '127.0.0.1'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.push(p);
@@ -202,13 +202,13 @@ console.log('— 8. second relay on same port → friendly EADDRINUSE');
   /already in use/.test(out) && code === 1 ? ok('friendly EADDRINUSE') : bad(`EADDRINUSE not friendly (exit=${code}): ${out.slice(0, 120)}`);
 }
 
-console.log('— 9. relay still alive at the end');
+console.log('▸ 9. relay still alive at the end');
 {
   const h = await health();
   h?.ok ? ok('relay healthy') : bad('relay died during the suite');
 }
 
-console.log('— 10. token mode: snippets work, unauthenticated calls are refused');
+console.log('▸ 10. token mode: snippets work, unauthenticated calls are refused');
 {
   const TPORT = PORT + 1;
   const TBASE = `http://127.0.0.1:${TPORT}`;

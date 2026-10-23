@@ -18,7 +18,7 @@ export function tailscaleIps() {
   return [...new Set(tailscalePeers().map((p) => p.ip))];
 }
 
-// probe http(s)://host:port/health — returns { ok, reason }
+// probe http(s)://host:port/health; returns { ok, reason }
 export async function probeDetailed(httpBase, ms = PROBE_MS) {
   try {
     const res = await fetch(`${httpBase}/health`, { signal: AbortSignal.timeout(ms) });
@@ -39,11 +39,11 @@ function hint(reasons, port) {
   const all = (pred) => reasons.length > 0 && reasons.every(pred);
   const lines = [];
   if (all((r) => r === 'connection refused')) {
-    lines.push('every tailnet host refused the connection — is the relay actually running? (tailbrowser relay)');
+    lines.push('every tailnet host refused the connection. Is the relay actually running? (tailbrowser relay)');
   } else if (all((r) => r === 'timeout' || r === 'network unreachable')) {
-    lines.push('every tailnet host timed out — this machine cannot open TCP connections over the tailnet.');
+    lines.push('every tailnet host timed out: this machine cannot open TCP connections over the tailnet.');
     lines.push('  • check: tailscale status   (are peers online? is this device connected?)');
-    lines.push('  • a VPN/proxy claiming 100.64.0.0/10 (CGNAT range) will black-hole tailnet IPs — disconnect it or split-tunnel 100.64/10');
+    lines.push('  • a VPN/proxy claiming 100.64.0.0/10 (CGNAT range) will black-hole tailnet IPs; disconnect it or split-tunnel 100.64/10');
     lines.push('  • corporate HTTP(S)_PROXY env does not affect Node fetch, but a transparent proxy might');
   }
   lines.push(`  • verify by hand from this machine:  curl -v -m 3 http://<relay-ip>:${port}/health`);
@@ -77,11 +77,11 @@ export async function discover({ port = Number(process.env.TAILBROWSER_PORT || D
     return host;
   }
 
-  // no hit — say WHY, not just "not found"
+  // no hit: say WHY, not just "not found"
   const tally = {};
   for (const r of results) tally[r.reason] = (tally[r.reason] || 0) + 1;
   log('discovery: no relay found on the tailnet (start one with: tailbrowser relay)');
-  log(`discovery: probe results — ${Object.entries(tally).map(([reason, n]) => `${n}× ${reason}`).join(', ')}`);
+  log(`discovery: probe results: ${Object.entries(tally).map(([reason, n]) => `${n}× ${reason}`).join(', ')}`);
   for (const r of results.filter((r) => r.online && !r.self).slice(0, 5)) {
     log(`discovery:   ${r.ip} (${r.hostName}): ${r.reason}`);
   }
@@ -98,14 +98,14 @@ export async function resolveHost({ force = false, rediscover = false, log = () 
   if (!force && cached) {
     const r = await probeDetailed(cached.replace(/^ws/, 'http'), 1000);
     if (r.ok) return { host: cached, source: 'cache' };
-    log(`cached relay ${cached} is down (${r.reason}) — re-discovering…`);
+    log(`cached relay ${cached} is down (${r.reason}), re-discovering…`);
   }
   const found = await discover({ log });
   if (found) return { host: found, source: 'discovered' };
   // nothing live on the tailnet: fall back to the stale cache rather than
   // localhost (localhost is almost always wrong for remote agents), but say so
   if (rediscover && cached) {
-    log(`no live relay found — falling back to last known ${cached}`);
+    log(`no live relay found, falling back to last known ${cached}`);
     return { host: cached, source: 'stale-cache' };
   }
   return { host: `ws://127.0.0.1:${DEFAULT_PORT}`, source: 'default' };

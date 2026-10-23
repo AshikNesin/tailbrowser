@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// tailbrowser MCP server — stdio JSON-RPC, single `execute` tool with sticky sessions.
+// tailbrowser MCP server: stdio JSON-RPC, single `execute` tool with sticky sessions.
 // Config: TAILBROWSER_HOST (overrides discovery), TAILBROWSER_TOKEN (optional)
 // Register (Claude Code / Cursor):
 //   { "mcpServers": { "tailbrowser": { "command": "node", "args": ["/path/to/agent/tailbrowser.mcp.mjs"] } } }
-// stdout carries the protocol — all diagnostics go to stderr.
+// stdout carries the protocol; all diagnostics go to stderr.
 
 import readline from 'node:readline';
 import { createRequire } from 'node:module';

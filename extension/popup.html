@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>tailbrowser</title>
+  <link rel="icon" href="icons/icon-32.png">
   <style>
     :root {
       --bg: #ffffff;
@@ -130,7 +131,7 @@
       <div class="tab-row">
         <img id="currentIcon" class="favicon" alt="">
         <div class="tab-text">
-          <div id="currentTitle" class="tab-title">—</div>
+          <div id="currentTitle" class="tab-title">…</div>
           <div id="currentUrl" class="tab-url"></div>
         </div>
         <span id="currentBadge" class="badge">Not shared</span>
@@ -169,7 +170,7 @@
         <label for="token">Token</label>
         <button id="clearToken" class="link hidden" type="button">Clear saved token</button>
       </div>
-      <input type="password" id="token" placeholder="Optional — leave blank if the relay is tokenless" autocomplete="off">
+      <input type="password" id="token" placeholder="Optional; leave blank if the relay is tokenless" autocomplete="off">
       <div class="actions">
         <button id="save" class="btn primary">Save &amp; connect</button>
         <button id="discover" class="btn">Find relay on this machine</button>

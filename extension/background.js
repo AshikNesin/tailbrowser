@@ -1,4 +1,4 @@
-// tailbrowser — extension service worker.
+// tailbrowser extension service worker.
 // Connects to the relay over WS and pipes CDP between it and chrome.debugger,
 // exposing only the tabs the current scope allows:
 //   tab        tabs the user opts in from the popup
@@ -10,11 +10,11 @@
 // Chrome 116, WebSocket traffic does NOT reset that timer, so a worker holding
 // the relay connection silently dies when Chrome is not focused. Keep-alive
 // is layered:
-//   1. offscreen keepalive port (20s pings) — primary; resets the idle timer
+//   1. offscreen keepalive port (20s pings): primary; resets the idle timer
 //      even with Chrome fully in the background
-//   2. chrome.alarms (every 30s) — wakes the worker if it died anyway (memory
+//   2. chrome.alarms (every 30s): wakes the worker if it died anyway (memory
 //      pressure, crash, manual stop); on wake it reconnects the WS if needed
-//   3. app-level WS ping (20s) with a 75s silence deadline — detects half-open
+//   3. app-level WS ping (20s) with a 75s silence deadline: detects half-open
 //      TCP (sleep/wake, network change) and forces a clean reconnect
 //
 // Everything that must survive a cold restart is persisted:
@@ -42,9 +42,9 @@ const BADGE = { gray: '#666', red: '#c0392b', green: '#1a9f47' };
 // ---------- state ----------
 
 let opts = { ...DEFAULT_OPTS };
-let revoked = false; // "Disconnect agent" — stay dark until settings are saved again
+let revoked = false; // "Disconnect agent": stay dark until settings are saved again
 const optedIn = new Set(); // tabIds the user opted in
-const dismissed = new Set(); // tabIds the user dismissed the debugger banner on / opted out of — never auto-attach
+const dismissed = new Set(); // tabIds the user dismissed the debugger banner on / opted out of; never auto-attach
 const attached = new Map(); // tabId -> CDP targetId
 const attaching = new Map(); // tabId -> Promise<targetId>, so concurrent attaches share one
 
@@ -63,8 +63,8 @@ let bootPromise = null;
 // worker (extension load, browser restart, worker restart after termination).
 function ready() {
   bootPromise ??= boot().catch((e) => {
-    // a failed boot must not leave the worker dark — retry
-    log('boot failed — retrying in 5s', errorMessage(e));
+    // a failed boot must not leave the worker dark, so retry
+    log('boot failed, retrying in 5s', errorMessage(e));
     bootPromise = null;
     setTimeout(() => ready().catch(() => {}), 5000);
     throw e;
@@ -100,7 +100,7 @@ function persistSession() {
 }
 
 // chrome.debugger attachments outlive worker restarts. Re-adopt tabs we had
-// attached before (recorded in storage.session) that are still attached —
+// attached before (recorded in storage.session) that are still attached,
 // never tabs someone else (e.g. DevTools) happens to be debugging.
 async function restoreAttached() {
   const { tbRuntime } = await chrome.storage.session.get('tbRuntime');
@@ -171,7 +171,7 @@ async function doAttach(tabId) {
   try {
     await chrome.debugger.attach(debuggee, '1.3');
   } catch (e) {
-    // our own stale attach (worker restarted and lost track of it) — take it over
+    // our own stale attach (worker restarted and lost track of it): take it over
     if (!errorMessage(e).includes('Another debugger is already attached')) throw e;
     try { await chrome.debugger.detach(debuggee); } catch {}
     await chrome.debugger.attach(debuggee, '1.3');
@@ -184,7 +184,7 @@ async function doAttach(tabId) {
   return targetId;
 }
 
-// The REAL CDP targetId — Playwright treats it as the main frame id, so a
+// The REAL CDP targetId. Playwright treats it as the main frame id, so a
 // synthetic id breaks every frame op. A brand-new tab can take a moment to
 // show up in getTargets, so retry briefly.
 async function resolveTargetId(tabId) {
@@ -302,7 +302,7 @@ function startPingLoop(sock) {
     if (relay.ws !== sock || sock.readyState !== WebSocket.OPEN) return clearInterval(timer);
     if (Date.now() - relay.lastHeardAt > SILENCE_DEADLINE_MS) {
       clearInterval(timer);
-      log('relay silent — half-open socket, reconnecting');
+      log('relay silent (half-open socket), reconnecting');
       return connect();
     }
     sock.send('ping');
@@ -317,12 +317,12 @@ function ensureConnection() {
   if (!sock) return connect();
   const now = Date.now();
   if (relay.connected && now - relay.lastHeardAt > SILENCE_DEADLINE_MS) {
-    log(`relay silent ${Math.round((now - relay.lastHeardAt) / 1000)}s — half-open socket, reconnecting`);
+    log(`relay silent ${Math.round((now - relay.lastHeardAt) / 1000)}s (half-open socket), reconnecting`);
     return connect();
   }
   // a half-open TCP endpoint can sit in CONNECTING forever
   if (sock.readyState === WebSocket.CONNECTING && now - sock.openedAt > SILENCE_DEADLINE_MS) {
-    log('socket stuck in CONNECTING — reconnecting');
+    log('socket stuck in CONNECTING, reconnecting');
     connect();
   }
 }
@@ -340,7 +340,7 @@ async function handleRelayMessage(raw) {
   }
 }
 
-// Always answer a request id — a throw must never leave the relay hanging.
+// Always answer a request id: a throw must never leave the relay hanging.
 async function answer(id, fn) {
   try {
     send({ t: 'cdpResult', id, ok: true, result: await fn() });
@@ -412,7 +412,7 @@ chrome.runtime.onConnect.addListener((port) => {
   });
   port.onDisconnect.addListener(() => {
     if (keepalivePort === port) keepalivePort = null;
-    setTimeout(ensureOffscreen, 1000); // offscreen doc went away — recreate it
+    setTimeout(ensureOffscreen, 1000); // offscreen doc went away; recreate it
   });
 });
 
@@ -508,7 +508,7 @@ async function resume() {
   return { ok: true };
 }
 
-// scope settings: applied in place — the relay is told, no reconnect needed
+// scope settings: applied in place: the relay is told, no reconnect needed
 async function setScope({ scopeMode, allowlist }) {
   if (scopeMode !== undefined) {
     if (!SCOPE_MODES.includes(scopeMode)) throw new Error(`unknown scope mode: ${scopeMode}`);

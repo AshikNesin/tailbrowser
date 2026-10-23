@@ -3,7 +3,7 @@
 // Chrome extensions need PNG icons; small sizes use a simplified master so
 // the toolbar icon stays legible at 16px.
 //
-// Run: node scripts/build-icons.mjs   (needs Chromium — CHROME_BIN or Playwright's cache)
+// Run: node scripts/build-icons.mjs   (needs Chromium: CHROME_BIN or Playwright's cache)
 
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';

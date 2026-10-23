@@ -23,8 +23,8 @@ for _ in $(seq 1 60); do
   sleep 0.5
 done
 
-echo "— health: $(curl -s http://127.0.0.1:$PORT/health)"
-echo "— tokenless mode smoke (tailnet-only posture)"
+echo "▸ health: $(curl -s http://127.0.0.1:$PORT/health)"
+echo "▸ tokenless mode smoke (tailnet-only posture)"
 if TAILBROWSER_HOST="ws://127.0.0.1:$PORT" node agent/demo.mjs; then
   echo "SMOKE OK (logs: $LOG)"
 else

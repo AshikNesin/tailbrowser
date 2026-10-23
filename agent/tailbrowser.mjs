@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// tailbrowser CLI — see USAGE below.
+// tailbrowser CLI. See USAGE below.
 
 import { resolveHost, discover } from './discover.mjs';
 import { configPath, loadConfig, updateConfig } from './config.mjs';
 import { createClient } from './client.mjs';
 
-const USAGE = `tailbrowser — let agents control a tailnet Chrome
+const USAGE = `tailbrowser: let agents control a tailnet Chrome
 relay discovery: TAILBROWSER_HOST env → ~/.tailbrowser/config.json → scan tailnet (tailscale status)
 usage:
   tailbrowser relay [--port 8787] [--bind ip] [--token x] [--allow ips]   start the relay server on this machine
@@ -92,7 +92,7 @@ async function runDiscover() {
     return;
   }
   const found = await discover({ log: console.error });
-  if (!found) die('no relay found — start one with: tailbrowser relay');
+  if (!found) die('no relay found; start one with: tailbrowser relay');
   console.log(`found + cached: ${found} → ${configPath()}`);
 }
 

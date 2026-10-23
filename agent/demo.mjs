@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// demo.mjs — end-to-end validation: connect Playwright through the relay
+// demo.mjs: end-to-end validation. connect Playwright through the relay
 // and drive the (fake or real) extension's browser.
 //
 // Usage: node demo.mjs [ws://127.0.0.1:8787]
@@ -30,7 +30,7 @@ console.log('✓ title:', title);
 const html = await page.content();
 console.log('✓ content length:', html.length);
 
-// DOM checks run on content we control — live sites change under us
+// DOM checks run on content we control, since live sites change under us
 await page.setContent('<h1> Hello </h1><a href="/next">next</a>');
 console.log('✓ h1:', (await page.textContent('h1')).trim());
 console.log('✓ link href:', await page.locator('a').first().getAttribute('href'));

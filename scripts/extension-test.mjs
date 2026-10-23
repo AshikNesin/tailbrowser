@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// tailbrowser extension e2e — loads the REAL unpacked extension (extension/)
+// tailbrowser extension e2e: loads the REAL unpacked extension (extension/)
 // into Chromium, configures it through the popup, and drives tabs through the
 // relay. Covers what the fake extension can't: chrome.debugger attach
 // semantics, scope modes, popup flows, revoke.
 //
-// Needs a full Chromium build (not the headless shell) — found via CHROME_BIN
+// Needs a full Chromium build (not the headless shell), found via CHROME_BIN
 // or Playwright's browser cache. Pages are served locally; no internet needed.
 //
 // Run: node scripts/extension-test.mjs [--screenshots <dir>]
@@ -29,7 +29,7 @@ const LOGDIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tb-ext-'));
 let pass = 0, fail = 0;
 const check = (cond, msg, detail = '') => {
   cond ? pass++ : fail++;
-  console.log(`  ${cond ? '✓' : '✗'} ${msg}${cond || !detail ? '' : ` — ${detail}`}`);
+  console.log(`  ${cond ? '✓' : '✗'} ${msg}${cond || !detail ? '' : `: ${detail}`}`);
 };
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(pred, ms = 10_000) {
@@ -92,10 +92,10 @@ async function screenshot(name) {
   await popup.screenshot({ path: path.join(SHOTS, `${name}.png`), fullPage: true });
 }
 
-console.log(`— extension ${extensionId} (logs: ${LOGDIR})`);
+console.log(`▸ extension ${extensionId} (logs: ${LOGDIR})`);
 await screenshot('1-setup');
 
-console.log('— 1. configure through the popup form');
+console.log('▸ 1. configure through the popup form');
 {
   const bad = await send({ t: 'saveOpts', opts: { relay: 'not a url' } });
   check(bad.ok === false && /Relay URL/.test(bad.error), 'invalid relay URL is rejected with a message', JSON.stringify(bad));
@@ -106,7 +106,7 @@ console.log('— 1. configure through the popup form');
   check(st.state === 'connected' && st.scopeMode === 'tab' && st.attached.length === 0, 'tab mode shares nothing by default', JSON.stringify(st));
 }
 
-console.log('— 2. tab mode: opt in and drive a tab');
+console.log('▸ 2. tab mode: opt in and drive a tab');
 {
   const r = await send({ t: 'optIn', tabId: siteTabId });
   check(r.ok && await until(async () => (await health()).targets === 1), 'opted-in tab is advertised', JSON.stringify(r));
@@ -119,7 +119,7 @@ console.log('— 2. tab mode: opt in and drive a tab');
   await screenshot('2-tab-mode');
 }
 
-console.log('— 3. full mode: every tab, agent-created tabs');
+console.log('▸ 3. full mode: every tab, agent-created tabs');
 {
   await send({ t: 'setScope', scopeMode: 'full' });
   check(await until(async () => (await health()).targets >= 2), 'all tabs attached');
@@ -131,14 +131,14 @@ console.log('— 3. full mode: every tab, agent-created tabs');
   await screenshot('3-full-mode');
 }
 
-console.log('— 4. narrowing scope detaches');
+console.log('▸ 4. narrowing scope detaches');
 {
   await send({ t: 'setScope', scopeMode: 'tab' });
   const st = await status();
   check(st.attached.length === 1 && st.attached[0].tabId === siteTabId, 'back to tab mode: only the opted-in tab remains', JSON.stringify(st.attached));
 }
 
-console.log('— 5. allowlist mode: auto-attach on navigation');
+console.log('▸ 5. allowlist mode: auto-attach on navigation');
 {
   await send({ t: 'optOut', tabId: siteTabId });
   await send({ t: 'setScope', scopeMode: 'allowlist', allowlist: [`${SITE}/in/*`, `${SITE}/q?x`] });
@@ -151,7 +151,7 @@ console.log('— 5. allowlist mode: auto-attach on navigation');
   await screenshot('4-allowlist');
 }
 
-console.log('— 6. revoke');
+console.log('▸ 6. revoke');
 {
   await send({ t: 'setScope', scopeMode: 'full' });
   await until(async () => (await health()).targets >= 2);

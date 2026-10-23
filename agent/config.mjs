@@ -1,4 +1,4 @@
-// ~/.tailbrowser/config.json — per-machine client state (discovered relay
+// ~/.tailbrowser/config.json: per-machine client state (discovered relay
 // host, sticky default session). Writers merge, so one never clobbers another.
 
 import fs from 'node:fs';
