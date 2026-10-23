@@ -5,14 +5,9 @@
 
 const $ = (id) => document.getElementById(id);
 
-const STATE_LABELS = { setup: 'Not set up', connecting: 'Connecting…', connected: 'Connected', revoked: 'Revoked' };
-const SCOPE_HELP = {
-  tab: 'Agents see only the tabs you share from this popup.',
-  allowlist: 'Agents see tabs whose URL matches a pattern, attached automatically as you browse.',
-  full: 'Agents see every tab and can open and close tabs.',
-};
+const STATE_LABELS = { setup: 'Not set up', connecting: 'Connecting', connected: 'Connected', revoked: 'Revoked' };
 const EMPTY_SHARED = {
-  tab: 'Nothing shared yet. Use “Share with agents” above.',
+  tab: 'Nothing shared yet. Turn on “This tab” above.',
   allowlist: 'No open tab matches the allowlist.',
   full: 'Waiting for the relay. Tabs are shared once connected.',
 };
@@ -61,15 +56,15 @@ function ago(ms) {
 
 function renderHeader() {
   const { state } = status;
-  $('statePill').dataset.state = state;
-  $('statePill').textContent = STATE_LABELS[state] || state;
+  $('status').dataset.state = state;
+  $('statusText').textContent = STATE_LABELS[state] || state;
 
   const ka = status.keepalive || {};
   $('subline').textContent = {
-    setup: 'Enter your relay URL below to get started.',
-    revoked: 'Agent access revoked. Nothing is shared.',
-    connecting: `Trying ${status.relay}…`,
-    connected: `${status.relay} · keep-alive ${ka.port ? '✓' : 'starting…'} · heard ${ago(ka.lastHeardAgoMs)}`,
+    setup: 'Enter your relay URL below to get started',
+    revoked: 'Agent access revoked; nothing is shared',
+    connecting: `trying ${status.relay}…`,
+    connected: `${status.relay} · keep-alive ${ka.port ? 'on' : 'starting'} · ${ago(ka.lastHeardAgoMs)}`,
   }[state] || '';
 
   const notice = $('notice');
@@ -89,27 +84,25 @@ function renderCurrentTab() {
   setFavicon($('currentIcon'), currentTab.favIconUrl);
   $('currentTitle').textContent = currentTab.title || 'Untitled tab';
   $('currentUrl').textContent = shortUrl(currentTab.url);
-  $('currentBadge').textContent = shared ? 'Shared' : 'Not shared';
-  $('currentBadge').classList.toggle('on', shared);
+  $('shareCard').classList.toggle('on', shared);
+  $('switchLabel').textContent = shared ? 'Shared' : 'Off';
 
-  const button = $('currentAction');
+  const toggle = $('currentAction');
   const blocked = status.state === 'setup' || status.state === 'revoked';
-  button.disabled = blocked;
-  button.textContent = shared ? 'Stop sharing' : 'Share with agents';
-  button.classList.toggle('primary', !shared);
+  toggle.disabled = blocked;
+  toggle.setAttribute('aria-checked', String(shared));
 
   const hint = $('currentHint');
   hint.textContent = blocked
     ? 'Reconnect the agent to share tabs again.'
-    : shared ? 'Chrome shows a “debugging this browser” banner while a tab is shared. Dismissing it stops sharing.' : '';
+    : shared ? 'Agents can use this tab. Chrome shows a “debugging” banner; dismissing it stops sharing.' : '';
   hint.classList.toggle('hidden', !hint.textContent);
 }
 
 function renderScope() {
   for (const button of document.querySelectorAll('[data-scope]')) {
-    button.setAttribute('aria-pressed', String(button.dataset.scope === status.scopeMode));
+    button.setAttribute('aria-checked', String(button.dataset.scope === status.scopeMode));
   }
-  $('scopeHelp').textContent = SCOPE_HELP[status.scopeMode] || '';
   $('allowlistBox').classList.toggle('hidden', status.scopeMode !== 'allowlist');
 }
 
@@ -117,11 +110,12 @@ function renderSharedTabs() {
   $('sharedSection').classList.toggle('hidden', status.state === 'setup');
   const box = $('sharedTabs');
   const tabs = status.attached;
-  $('sharedCount').textContent = tabs.length ? `· ${tabs.length}` : '';
+  $('sharedCount').textContent = tabs.length;
+  $('sharedCount').classList.toggle('hidden', !tabs.length);
   box.replaceChildren();
   if (!tabs.length) {
     const empty = document.createElement('div');
-    empty.className = 'muted small';
+    empty.className = 'empty';
     empty.textContent = status.state === 'revoked'
       ? 'Nothing is shared while access is revoked.'
       : EMPTY_SHARED[status.scopeMode] || '';
@@ -148,9 +142,10 @@ function renderSharedTabs() {
     text.append(title, url);
 
     const stop = document.createElement('button');
-    stop.className = 'btn small-btn';
-    stop.textContent = 'Stop';
+    stop.className = 'icon-btn';
     stop.title = 'Stop sharing this tab';
+    stop.setAttribute('aria-label', `Stop sharing ${tab.title || 'this tab'}`);
+    stop.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7"/></svg>';
     stop.onclick = () => act(stop, () => call('optOut', { tabId: tab.tabId }));
 
     row.append(icon, text, stop);
@@ -164,17 +159,19 @@ function renderSettings() {
     ? 'Saved. Leave blank to keep it.'
     : 'Optional; leave blank if the relay is tokenless';
 
-  const revoke = $('revoke');
-  revoke.classList.toggle('hidden', status.state === 'setup');
-  revoke.textContent = status.state === 'revoked' ? 'Reconnect agent' : 'Disconnect agent (revoke access)';
-  revoke.classList.toggle('danger', status.state !== 'revoked');
-  revoke.classList.toggle('primary', status.state === 'revoked');
+  const revoked = status.state === 'revoked';
+  $('revoke').classList.toggle('hidden', status.state === 'setup');
+  $('revoke').classList.toggle('resume', revoked);
+  $('revokeText').textContent = revoked ? 'Reconnect agent' : 'Revoke agent access';
+  $('relaySummary').textContent = $('relaySettings').open ? '' : (status.relay || '').replace(/^wss?:\/\//, '');
 
   syncField($('relay'), status.relay || '');
   syncField($('allowlist'), (status.allowlist || []).join('\n'));
   if (firstRender) $('relaySettings').open = status.state === 'setup';
   firstRender = false;
 }
+
+$('relaySettings').addEventListener('toggle', () => { if (status) renderSettings(); });
 
 // fields the user is editing (focused, or changed and not yet saved) are left alone
 function syncField(el, value) {
@@ -188,6 +185,7 @@ for (const el of [$('relay'), $('allowlist')]) {
 
 function render() {
   status.attached ||= [];
+  document.body.dataset.state = status.state;
   renderHeader();
   renderCurrentTab();
   renderScope();

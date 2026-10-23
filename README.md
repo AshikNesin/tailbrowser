@@ -2,7 +2,7 @@
 
 # tailbrowser
 
-tailbrowser lets AI agents control a real Chrome browser through your **Tailscale network** (tailnet). You select the pages that the agents can use, or you give them the full browser. tailbrowser is a minimal, self-hosted version of [Playwriter](https://github.com/remorses/playwriter) for the tailnet.
+tailbrowser lets AI agents control a real Chrome browser through your **Tailscale network** (tailnet). You select the pages that the agents can use, or you give them the full browser.
 
 **Status:** M1.1. tailbrowser is in daily use with a real Chrome browser. M1.1 has these features:
 
@@ -44,7 +44,7 @@ On the computer that runs Chrome, do these steps:
 4. Select the `extension/` folder.
 5. Open the extension popup.
 6. Connect the extension to the relay:
-   - If the relay is on the same computer, click **Find relay on this machine**.
+   - If the relay is on the same computer, click **Find local relay**.
    - If the relay is on a different computer, type `ws://<relay-ip>:8787` in **Relay URL**. Then click **Save & connect**.
 7. To share the current tab, click **Share with agents**.
 8. To share more tabs, select a different scope in **Agent access**.
@@ -187,3 +187,7 @@ tailbrowser uses three mechanisms to prevent this problem. You do not have to co
 3. **Application-level WebSocket ping** (a ping every 20 seconds, a 75-second limit): This mechanism finds half-open connections after the computer sleeps or the network changes. It then replaces the connection. The relay uses the same method in the opposite direction. If the extension is not connected, the relay returns `TB_ERR: extension not connected` immediately. It does not wait 30 seconds on a dead connection.
 
 The popup shows the keep-alive status (`keep-alive ✓ · heard Ns ago`).
+
+## Acknowledgements
+
+The relay design follows [Playwriter](https://github.com/remorses/playwriter): the `/extension` and `/cdp/:id` endpoint split and the single `execute` tool with sticky sessions.
