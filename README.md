@@ -2,7 +2,7 @@
 
 Let AI agents on your **Tailscale network** control a **real Chrome** — scoped to pages you allow, or the whole browser. Minimal self-hosted [Playwriter](https://github.com/remorses/playwriter), tailnet-native.
 
-**Status: M1.1** — hardened relay (fault-isolated, self-healing Playwright link, real CDP attach semantics). — stateful snippet sessions, CLI, MCP server, auto-discovery, background keep-alive. Working in daily use against real Chrome.
+**Status: M1.1** — hardened relay (fault-isolated, self-healing Playwright link, real CDP attach semantics), stateful snippet sessions, CLI, MCP server, auto-discovery, background keep-alive, all three scope modes. Working in daily use against real Chrome.
 
 ```
 Chrome + extension ──ws──► relay :8787 ◄──ws── agents (CLI / MCP / npx)
@@ -17,7 +17,7 @@ npx tailbrowser relay        # or: node agent/tailbrowser.mjs relay
 ```
 It auto-binds the tailscale IP, runs tokenless (tailnet membership = auth), and prints exactly what to paste where.
 
-**2. Install the extension** on the Chrome device: `chrome://extensions` → Developer mode → Load unpacked → `extension/` folder. Popup → **Discover** (finds a relay on the same machine) or paste `ws://<relay-ip>:8787` → **Save & connect**.
+**2. Install the extension** on the Chrome device: `chrome://extensions` → Developer mode → Load unpacked → `extension/` folder. Popup → **Find relay on this machine**, or paste `ws://<relay-ip>:8787` → **Save & connect**. Then share a tab (**Share with agents**) or pick a wider scope under **Agent access**.
 
 **3. Drive it from any tailnet machine:**
 ```bash
@@ -43,7 +43,7 @@ Single `execute` tool with sticky sessions; snippet scope: `page, context, state
 ## Commands
 
 ```
-tailbrowser relay [--port 8787] [--bind ip] [--token x]   start the relay
+tailbrowser relay [--port 8787] [--bind ip] [--token x] [--allow ips]   start the relay
 tailbrowser discover             find + cache a relay on the tailnet
 tailbrowser -e 'code'            run a snippet (sticky default session)
 tailbrowser -s 2 -e 'code'       run in a specific session
@@ -56,14 +56,39 @@ tailbrowser scope | health
 
 - Relay binds the **tailscale interface only** — nothing off-tailnet can even connect
 - Tokenless by default: your tailnet's membership (WireGuard) is the auth. `--token` available for shared tailnets
-- Scope modes: **Tabs I pick** / **URL allowlist** / **Entire browser** — enforced in the extension; unpermitted tabs don't exist from the agent's view
-- Chrome's yellow "debugging" banner always shows when a tab is under automation; dismissing it revokes that tab
+- `--allow 100.101.102.103,100.64.0.0/10` restricts which source IPs may connect at all
+- Scope modes: **Tabs I pick** / **Allowlist** (glob patterns, auto-attached as you browse) / **Entire browser** — enforced in the extension; unpermitted tabs don't exist from the agent's view. Narrowing the scope detaches tabs immediately
+- Chrome's "debugging" banner always shows when a tab is under automation; dismissing it (or **Stop** in the popup) un-shares that tab, and no mode re-attaches it behind your back
+- **Disconnect agent** drops the relay link and every debugger attachment, and stays revoked across browser/worker restarts until you reconnect
 - `newPage()`/tab creation requires full-browser mode (`TB_SCOPE` error otherwise)
 
 ## Dev
 
-`bash scripts/smoke.sh` — end-to-end test (relay + fake extension + headless chromium, no real Chrome needed). `agent/fake-extension.mjs` simulates the extension against real headless Chromium for CI.
-`node scripts/stability-test.mjs` — stability regression suite (crash isolation, flap recovery, newPage, concurrency, EADDRINUSE).
+```
+npm test                  # stability regression suite (relay + fake extension + headless Chromium)
+npm run test:extension    # loads the REAL extension into Chromium and drives it end-to-end
+npm run smoke             # quick Playwright demo through relay + fake extension
+```
+`agent/fake-extension.mjs` simulates the extension against real headless Chromium, so the relay can be tested without a GUI Chrome. The tests find Chromium via `CHROME_BIN` or Playwright's browser cache (`PLAYWRIGHT_BROWSERS_PATH`); `test:extension` needs a full Chromium build (the headless shell can't load extensions).
+
+### Layout
+
+```
+relay/
+  relay.mjs            entrypoint: config, wiring, HTTP/WS server, banner
+  config.mjs auth.mjs  flags/env, bind detection, --allow filter, token + internal-key checks
+  extension-link.mjs   the /extension pipe (one extension, request/response + target events)
+  cdp-bridge.mjs       /cdp/:id — synthesizes the browser-level CDP session for Playwright
+  sandbox.mjs          sessions + snippet execution over one shared Playwright connection
+  http-api.mjs         /health /scope /session /execute /json/version
+agent/
+  tailbrowser.mjs      CLI            tailbrowser.mcp.mjs   MCP server (stdio)
+  client.mjs           relay HTTP client (timeouts, friendly errors) shared by CLI/MCP/library
+  discover.mjs         relay discovery (env → cache → tailnet scan)    config.mjs  ~/.tailbrowser/config.json
+  index.mjs            programmatic API    fake-extension.mjs  test double for the extension
+lib/                   helpers shared by relay and agent (flags, errors, tailscale CLI, chromium lookup)
+extension/             MV3 extension: background.js (service worker), popup, offscreen keep-alive
+```
 
 ## Stability model (what keeps it up)
 
@@ -77,7 +102,7 @@ tailbrowser is designed to run unattended for weeks. The relay is the long-lived
 
 **Diagnosability:** every log line is timestamped; an event-loop stall watchdog flags a hanging synchronous snippet; `curl <relay>/health` answers in one round-trip.
 
-Run the regression suite: `node scripts/stability-test.mjs` (13 checks: crash isolation, flap recovery without restart, `newPage()` end-to-end, concurrent load, garbage frames, session-state poisoning, friendly `EADDRINUSE`).
+Run the regression suite: `npm test` (crash isolation, flap recovery without restart, `newPage()`/`page.close()` end-to-end, concurrent load, garbage frames, session-state poisoning, session-id collisions, MCP protocol edge cases, token mode, friendly `EADDRINUSE`).
 
 ## Background / keep-alive architecture
 
@@ -87,4 +112,4 @@ Chrome terminates MV3 service workers ~30s after their last event, and since Chr
 2. **`chrome.alarms` fallback** (every 30s): if the worker is terminated anyway (memory pressure, crash), the alarm fires, Chrome restarts the worker, and it reconnects + re-advertises attached targets automatically. `chrome.debugger` attachments survive worker restarts; opts/opt-ins persist via `chrome.storage`.
 3. **App-level WS ping/pong** (20s ping / 75s deadline): detects half-open sockets after sleep/wake or network switches and recycles the connection. The relay applies the same discipline in reverse and fails agent commands fast (`TB_ERR: extension not connected`) instead of stalling 30s on a dead pipe.
 
-The popup shows live keep-alive status (`port ✓ · last relay pong Ns ago`).
+The popup shows live keep-alive status (`keep-alive ✓ · heard Ns ago`).
