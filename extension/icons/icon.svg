@@ -1,24 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
   <!-- tailbrowser icon (48px and up): an agent's cursor gliding into a browser
        window, trailing a dotted "tail" — remote control over the tailnet.
-       PNGs are generated from this file: node scripts/build-icons.mjs -->
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#8B5CF6"/>
-      <stop offset=".55" stop-color="#4F46E5"/>
-      <stop offset="1" stop-color="#0EA5E9"/>
-    </linearGradient>
-  </defs>
-  <rect width="128" height="128" rx="30" fill="url(#bg)"/>
+       Colors follow Tailscale's palette: warm near-black, warm off-white,
+       warm grays, and their brick-red accent for the one thing that acts.
+       PNGs are generated from this file: npm run build:icons -->
+  <!-- tile, with a warm-gray rim so it doesn't vanish on dark toolbars -->
+  <rect x="1" y="1" width="126" height="126" rx="29" fill="#1f1e1e" stroke="#444342" stroke-width="2"/>
   <!-- browser window -->
-  <rect x="20" y="18" width="88" height="64" rx="13" fill="#fff" fill-opacity=".14" stroke="#fff" stroke-width="6"/>
-  <path d="M20 37h88" stroke="#fff" stroke-width="6"/>
-  <circle cx="33" cy="27.5" r="3.2" fill="#fff"/>
-  <circle cx="44" cy="27.5" r="3.2" fill="#fff" fill-opacity=".7"/>
-  <!-- tail: the path the agent took to get here -->
-  <circle cx="44" cy="66" r="5.6" fill="#fff" fill-opacity=".95"/>
-  <circle cx="32" cy="93" r="4.4" fill="#fff" fill-opacity=".7"/>
-  <circle cx="21" cy="110" r="3.3" fill="#fff" fill-opacity=".45"/>
+  <rect x="20" y="18" width="88" height="64" rx="13" fill="#2e2d2d" stroke="#f9f7f6" stroke-width="6"/>
+  <path d="M20 37h88" stroke="#f9f7f6" stroke-width="6"/>
+  <circle cx="33" cy="27.5" r="3.2" fill="#f9f7f6"/>
+  <circle cx="44" cy="27.5" r="3.2" fill="#706e6d"/>
+  <!-- tail: the path the agent took to get here, fading through warm grays -->
+  <circle cx="44" cy="66" r="5.6" fill="#f9f7f6"/>
+  <circle cx="32" cy="93" r="4.4" fill="#a8a5a3"/>
+  <circle cx="21" cy="110" r="3.3" fill="#706e6d"/>
   <!-- agent cursor, breaking out of the frame -->
-  <path d="M58 50v50l12.5-11.5 9.5 19.5 10.5-5-9.5-19H99z" fill="#1E1B4B" stroke="#fff" stroke-width="6" stroke-linejoin="round" paint-order="stroke"/>
+  <path d="M58 50v50l12.5-11.5 9.5 19.5 10.5-5-9.5-19H99z" fill="#d04841" stroke="#f9f7f6" stroke-width="6" stroke-linejoin="round" paint-order="stroke"/>
 </svg>
