@@ -18,6 +18,12 @@ Chrome + extension ──ws──► relay :8787 ◄──ws── agents (CLI /
    (Mac mini etc.)       (any tailnet box)
 ```
 
+## Demo
+
+[![tailbrowser product video](media/tailbrowser-poster.jpg)](media/tailbrowser.mp4)
+
+The video is 48 seconds long. The browser and popup frames are real captures from the extension and the relay. To make the video again, run `npm run video`.
+
 ## Quick start
 
 ### 1. Start the relay
@@ -115,6 +121,7 @@ npm test                  # run the stability tests (relay, fake extension, head
 npm run test:extension    # load the real extension into Chromium and test it
 npm run smoke             # run a quick Playwright demo through the relay
 npm run build:icons       # make the PNG icons from the SVG files in extension/icons/
+npm run video             # capture real footage, then render media/tailbrowser.mp4
 ```
 
 `agent/fake-extension.mjs` simulates the extension with a real headless Chromium. This lets you test the relay without a Chrome window.

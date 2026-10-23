@@ -1,0 +1,422 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>tailbrowser product video</title>
+<!--
+  Product video composition. Every element's state is a pure function of time:
+  render(t) draws the frame at t seconds, so frames can be captured one by one
+  (see render.mjs). Open this file in a browser and add #play to preview it.
+  Footage in assets/ is real (see capture-assets.mjs).
+-->
+<style>
+  :root {
+    --ink: #181717; --tile: #1f1e1e; --surface: #232222; --raised: #2e2d2d; --line: #444342;
+    --muted: #706e6d; --soft: #a8a5a3; --paper: #f9f7f6; --accent: #b8554c;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--ink); }
+  body { font-family: Inter, system-ui, sans-serif; color: var(--paper); -webkit-font-smoothing: antialiased; }
+  #stage {
+    position: relative; width: 1920px; height: 1080px; overflow: hidden;
+    background: radial-gradient(circle, rgba(249,247,246,.045) 1.4px, transparent 1.6px) 0 0 / 36px 36px, var(--ink);
+  }
+  .scene, .abs { position: absolute; }
+  .scene { inset: 0; opacity: 0; }
+  .center { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+  .eyebrow { font-size: 22px; letter-spacing: .14em; text-transform: uppercase; color: var(--soft); font-weight: 600; }
+  .title { font-size: 64px; font-weight: 700; letter-spacing: -.025em; line-height: 1.1; }
+  .sub { font-size: 30px; color: var(--soft); line-height: 1.4; }
+  .accent { color: var(--accent); }
+
+  /* scene 1: intro */
+  #s1 .wordmark { font-size: 96px; font-weight: 700; letter-spacing: -.035em; margin-top: 42px; }
+  #s1 .tagline { font-size: 36px; color: var(--soft); margin-top: 18px; }
+
+  /* scene 2: problem */
+  .card { width: 520px; padding: 40px 44px; border-radius: 28px; background: var(--surface); border: 2px solid var(--line); }
+  .card h3 { font-size: 44px; font-weight: 700; letter-spacing: -.02em; margin: 18px 0 8px; }
+  .card p { font-size: 26px; color: var(--soft); line-height: 1.4; }
+  .glyph { width: 72px; height: 72px; border-radius: 18px; background: var(--raised); display: grid; place-items: center; }
+  .link-label { font-size: 26px; font-weight: 600; text-align: center; width: 560px; }
+
+  /* scene 3: architecture */
+  .node { width: 460px; height: 210px; border-radius: 26px; background: var(--surface); border: 2px solid var(--line); padding: 34px 38px; }
+  .node h4 { font-size: 36px; font-weight: 700; letter-spacing: -.02em; }
+  .node p { font-size: 24px; color: var(--soft); margin-top: 10px; }
+  .node .tag { font-size: 20px; color: var(--muted); margin-top: 14px; }
+  .caption { font-size: 34px; text-align: center; width: 1400px; left: 260px; }
+
+  /* scene 4: demo */
+  .terminal { background: #141313; border: 2px solid var(--line); border-radius: 20px; overflow: hidden; }
+  .term-bar { height: 52px; background: var(--surface); display: flex; align-items: center; gap: 10px; padding: 0 20px; color: var(--muted); font-size: 18px; }
+  .dot { width: 13px; height: 13px; border-radius: 50%; background: var(--line); }
+  .term-body { padding: 28px 30px; font-size: 25px; line-height: 1.6; white-space: pre; color: var(--paper); }
+  .term-body .dim { color: var(--muted); }
+  .term-body .res { color: #8fd1a1; }
+  .caret { display: inline-block; width: 13px; height: 28px; background: var(--paper); vertical-align: -5px; margin-left: 2px; }
+  .browser { background: #fff; border-radius: 20px; overflow: hidden; border: 2px solid var(--line); box-shadow: 0 30px 80px rgba(0,0,0,.45); }
+  .b-tabs { height: 46px; background: #dedcdb; display: flex; align-items: flex-end; padding: 0 14px; gap: 8px; }
+  .b-tab { height: 36px; background: #fff; border-radius: 10px 10px 0 0; padding: 0 18px; display: flex; align-items: center; gap: 10px; font-size: 16px; color: #1f1e1e; }
+  .b-fav { width: 16px; height: 16px; border-radius: 4px; background: #2e2d2d; color: #fff; font: 700 10px/16px Arial, sans-serif; text-align: center; }
+  .b-url { height: 48px; background: #fff; display: flex; align-items: center; padding: 0 16px; border-bottom: 1px solid #eeebea; }
+  .b-url div { flex: 1; height: 34px; border-radius: 17px; background: #f1efee; display: flex; align-items: center; padding: 0 18px; font-size: 17px; color: #444342; }
+  .b-info { height: 46px; background: #f7f5f4; border-bottom: 1px solid #e6e2e0; display: flex; align-items: center; gap: 12px; padding: 0 18px; font-size: 16px; color: #2e2d2d; }
+  .b-info .btn { margin-left: auto; padding: 5px 14px; border: 1px solid #c9c4c1; border-radius: 8px; font-size: 15px; }
+  .b-page { position: relative; width: 1040px; height: 617.5px; }
+  .b-page img { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .ring { width: 76px; height: 76px; margin: -38px 0 0 -38px; border-radius: 50%; border: 4px solid var(--accent); }
+  .agent-label { font-size: 15px; font-weight: 700; color: var(--paper); background: var(--accent); padding: 3px 10px; border-radius: 999px; }
+
+  /* scene 5: scope */
+  .mode { width: 760px; padding: 26px 32px 26px 36px; border-left: 6px solid var(--line); margin-bottom: 18px; }
+  .mode h4 { font-size: 40px; font-weight: 700; letter-spacing: -.02em; }
+  .mode p { font-size: 26px; color: var(--soft); margin-top: 6px; }
+  .popup-frame { width: 420px; border-radius: 18px; overflow: hidden; border: 2px solid var(--line); box-shadow: 0 30px 80px rgba(0,0,0,.45); background: #f9f7f6; }
+  .popup-frame img { display: block; width: 420px; position: absolute; top: 0; left: 0; }
+
+  /* scene 6: security */
+  .row { display: flex; align-items: center; gap: 28px; font-size: 38px; margin-bottom: 34px; }
+  .row b { font-weight: 700; }
+  .row span { color: var(--soft); }
+  .bullet { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); flex: none; }
+
+  /* scene 7: CTA */
+  .cmd { font-size: 40px; padding: 22px 40px; border-radius: 18px; background: var(--surface); border: 2px solid var(--line); }
+  .cmd .dim { color: var(--muted); }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- 1. intro -->
+  <section class="scene center" id="s1">
+    <svg id="logo" width="240" height="240" viewBox="0 0 128 128" style="overflow:visible">
+      <rect id="l-tile" x="1" y="1" width="126" height="126" rx="29" fill="#1f1e1e" stroke="#444342" stroke-width="2"/>
+      <rect id="l-win" x="20" y="18" width="88" height="64" rx="13" fill="#2e2d2d" stroke="#f9f7f6" stroke-width="6" pathLength="1"/>
+      <path id="l-bar" d="M20 37h88" stroke="#f9f7f6" stroke-width="6" pathLength="1"/>
+      <circle id="l-b1" cx="33" cy="27.5" r="3.2" fill="#f9f7f6"/>
+      <circle id="l-b2" cx="44" cy="27.5" r="3.2" fill="#706e6d"/>
+      <circle id="l-d3" cx="21" cy="110" r="3.3" fill="#706e6d"/>
+      <circle id="l-d2" cx="32" cy="93" r="4.4" fill="#a8a5a3"/>
+      <circle id="l-d1" cx="44" cy="66" r="5.6" fill="#f9f7f6"/>
+      <path id="l-cursor" d="M58 50v50l12.5-11.5 9.5 19.5 10.5-5-9.5-19H99z" fill="#b8554c" stroke="#f9f7f6" stroke-width="6" stroke-linejoin="round" paint-order="stroke"/>
+    </svg>
+    <div class="wordmark" id="s1-word">tailbrowser</div>
+    <div class="tagline" id="s1-tag">Let AI agents drive your real Chrome, over your tailnet.</div>
+  </section>
+
+  <!-- 2. problem -->
+  <section class="scene" id="s2">
+    <div class="abs title" id="s2-h1" style="left:160px; top:130px">Your agent runs in the cloud.</div>
+    <div class="abs title" id="s2-h2" style="left:160px; top:214px; color:var(--soft)">Your signed-in browser is at home.</div>
+    <div class="abs card" id="s2-agent" style="left:160px; top:420px">
+      <div class="glyph mono" style="font-size:30px; color:var(--soft)">&gt;_</div>
+      <h3>AI agent</h3><p>Claude Code, Cursor, a CI job</p>
+    </div>
+    <div class="abs card" id="s2-chrome" style="left:1240px; top:420px">
+      <div class="glyph"><svg width="40" height="40" viewBox="0 0 40 40"><rect x="3" y="6" width="34" height="27" rx="6" fill="none" stroke="#f9f7f6" stroke-width="3"/><path d="M3 14h34" stroke="#f9f7f6" stroke-width="3"/></svg></div>
+      <h3>Your Chrome</h3><p>Logins, cookies, extensions</p>
+    </div>
+    <svg class="abs" style="left:680px; top:420px" width="560" height="300" viewBox="0 0 560 300">
+      <path id="s2-tunnel" d="M10 90 H550" stroke="#706e6d" stroke-width="4" stroke-dasharray="14 12" fill="none"/>
+      <g id="s2-x" stroke="#b8554c" stroke-width="7" stroke-linecap="round"><path d="M262 72 l36 36 M298 72 l-36 36"/></g>
+      <path id="s2-net" d="M10 210 H550" stroke="#f9f7f6" stroke-width="5" fill="none" pathLength="1"/>
+      <circle id="s2-p1" r="9" cy="210" fill="#b8554c"/>
+      <circle id="s2-p2" r="9" cy="210" fill="#b8554c"/>
+    </svg>
+    <div class="abs link-label" id="s2-tlabel" style="left:680px; top:450px; color:var(--muted)">public tunnel? port forwarding?</div>
+    <div class="abs link-label" id="s2-nlabel" style="left:680px; top:660px">your tailnet <span style="color:var(--muted)">· WireGuard</span></div>
+    <div class="abs sub" id="s2-cap" style="left:160px; top:880px; width:1600px; color:var(--paper)">tailbrowser connects them over your tailnet. <span class="accent">No public tunnel. No open ports.</span></div>
+  </section>
+
+  <!-- 3. architecture -->
+  <section class="scene" id="s3">
+    <div class="abs eyebrow" id="s3-eye" style="left:160px; top:120px">How it works</div>
+    <div class="abs" id="s3-net" style="left:110px; top:250px; width:1700px; height:470px; border:3px dashed var(--line); border-radius:40px"></div>
+    <div class="abs" id="s3-netlabel" style="left:150px; top:228px; padding:0 16px; background:var(--ink); color:var(--muted); font-size:24px; font-weight:600">your tailnet</div>
+    <div class="abs node" id="s3-n1" style="left:150px; top:380px"><h4>Chrome + extension</h4><p>Shares the tabs you pick</p><div class="tag">Mac mini at home</div></div>
+    <div class="abs node" id="s3-n2" style="left:730px; top:380px"><h4>relay <span class="mono" style="font-size:30px; color:var(--soft)">:8787</span></h4><p>Bridges Playwright to the tabs</p><div class="tag">any tailnet machine</div></div>
+    <div class="abs node" id="s3-n3" style="left:1310px; top:380px"><h4>Agents</h4><p>CLI, MCP, npx</p><div class="tag">anywhere on the tailnet</div></div>
+    <svg class="abs" style="left:610px; top:470px" width="120" height="40" viewBox="0 0 120 40"><path id="s3-l1" d="M0 20H120" stroke="#706e6d" stroke-width="4"/><circle id="s3-a1" r="7" cy="20" fill="#b8554c"/><circle id="s3-a2" r="7" cy="20" fill="#f9f7f6"/></svg>
+    <svg class="abs" style="left:1190px; top:470px" width="120" height="40" viewBox="0 0 120 40"><path id="s3-l2" d="M0 20H120" stroke="#706e6d" stroke-width="4"/><circle id="s3-b1" r="7" cy="20" fill="#b8554c"/><circle id="s3-b2" r="7" cy="20" fill="#f9f7f6"/></svg>
+    <div class="abs caption" id="s3-c1" style="top:820px">The extension attaches to the tabs you share.</div>
+    <div class="abs caption" id="s3-c2" style="top:820px">The relay bridges Playwright to those tabs.</div>
+    <div class="abs caption" id="s3-c3" style="top:820px">Agents run Playwright snippets against your real browser.</div>
+  </section>
+
+  <!-- 4. demo -->
+  <section class="scene" id="s4">
+    <div class="abs eyebrow" id="s4-eye" style="left:100px; top:70px">One command. Your real, signed-in browser.</div>
+    <div class="abs terminal" id="s4-term" style="left:100px; top:150px; width:700px; height:760px">
+      <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span style="margin-left:12px">laptop: zsh</span></div>
+      <div class="term-body mono" id="s4-text"></div>
+    </div>
+    <div class="abs browser" id="s4-browser" style="left:840px; top:150px; width:1044px">
+      <div class="b-tabs"><div class="b-tab"><span class="b-fav">A</span>Acme Ops · Orders</div></div>
+      <div class="b-url"><div>ops.acme.test/orders</div></div>
+      <div class="b-info"><span>“tailbrowser” started debugging this browser</span><span class="btn">Cancel</span></div>
+      <div class="b-page" id="s4-page">
+        <img id="s4-f1" src="assets/demo-1-start.png">
+        <img id="s4-f2" src="assets/demo-2-filled.png">
+        <img id="s4-f3" src="assets/demo-3-result.png">
+        <div class="abs ring" id="s4-ring"></div>
+        <div class="abs" id="s4-cursor" style="left:0; top:0">
+          <svg width="44" height="54" viewBox="56 48 46 64"><path d="M58 50v50l12.5-11.5 9.5 19.5 10.5-5-9.5-19H99z" fill="#b8554c" stroke="#f9f7f6" stroke-width="5" stroke-linejoin="round" paint-order="stroke"/></svg>
+          <span class="abs agent-label" style="left:40px; top:44px">agent</span>
+        </div>
+      </div>
+    </div>
+    <div class="abs sub" id="s4-cap" style="left:100px; top:950px; width:1700px; color:var(--paper)">Real Playwright, real tabs, your existing logins. <span style="color:var(--muted)">The agent read back “Shipped”.</span></div>
+  </section>
+
+  <!-- 5. scope -->
+  <section class="scene" id="s5">
+    <div class="abs title" id="s5-h" style="left:160px; top:150px">You choose what agents can see.</div>
+    <div class="abs" style="left:160px; top:330px">
+      <div class="mode" id="s5-m1"><h4>Tabs I pick</h4><p>Only the tabs you share.</p></div>
+      <div class="mode" id="s5-m2"><h4>Allowlist</h4><p>Tabs that match your URL patterns, as you browse.</p></div>
+      <div class="mode" id="s5-m3"><h4>Entire browser</h4><p>Every tab, plus opening and closing tabs.</p></div>
+    </div>
+    <div class="abs popup-frame" id="s5-popup" style="left:1280px; top:100px; height:880px">
+      <img id="s5-p1" src="assets/popup-tab.png">
+      <img id="s5-p2" src="assets/popup-allowlist.png">
+      <img id="s5-p3" src="assets/popup-full.png">
+    </div>
+  </section>
+
+  <!-- 6. security -->
+  <section class="scene" id="s6">
+    <div class="abs title" id="s6-h" style="left:260px; top:200px">Private by design.</div>
+    <div class="abs" style="left:260px; top:390px">
+      <div class="row" id="s6-r1"><i class="bullet"></i><div><b>Tailnet only.</b> <span>The relay binds to your Tailscale IP.</span></div></div>
+      <div class="row" id="s6-r2"><i class="bullet"></i><div><b>Optional token</b> <span>for shared tailnets.</span></div></div>
+      <div class="row" id="s6-r3"><i class="bullet"></i><div><b>Always visible.</b> <span>Chrome's debugging banner on every shared tab.</span></div></div>
+      <div class="row" id="s6-r4"><i class="bullet"></i><div><b>One click</b> <span>revokes everything.</span></div></div>
+    </div>
+  </section>
+
+  <!-- 7. call to action -->
+  <section class="scene center" id="s7">
+    <img id="s7-logo" src="../../extension/icons/icon.svg" width="150" height="150">
+    <div style="font-size:84px; font-weight:700; letter-spacing:-.035em; margin:30px 0 40px" id="s7-word">tailbrowser</div>
+    <div class="cmd mono" id="s7-cmd"><span class="dim">$</span> npx tailbrowser relay</div>
+    <div class="sub" id="s7-sub" style="margin-top:34px">Load the extension. Point your agent at it.</div>
+    <div class="sub mono" id="s7-url" style="margin-top:60px; font-size:28px; color:var(--muted)">github.com/AshikNesin/tailbrowser</div>
+  </section>
+
+</div>
+<script>
+const DURATION = 48;
+const $ = (id) => document.getElementById(id);
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const easeOut = (x) => 1 - Math.pow(1 - x, 3);
+const easeIn = (x) => x * x * x;
+const easeInOut = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+const prog = (t, start, dur) => clamp((t - start) / dur);
+const lerp = (a, b, x) => a + (b - a) * x;
+
+// fade + rise in at `start`, fade out ending at `end`
+function appear(el, t, start, end = Infinity, rise = 24, dur = 0.55) {
+  const a = easeOut(prog(t, start, dur));
+  const b = end === Infinity ? 1 : 1 - easeIn(prog(t, end - dur * 0.7, dur * 0.7));
+  const o = Math.min(a, b);
+  el.style.opacity = o;
+  el.style.transform = `translateY(${(1 - a) * rise}px)`;
+  return o;
+}
+function scene(id, t, start, end) {
+  const el = $(id);
+  const o = Math.min(easeOut(prog(t, start, 0.45)), 1 - easeIn(prog(t, end - 0.45, 0.45)));
+  el.style.opacity = o;
+  el.style.visibility = o > 0 ? 'visible' : 'hidden';
+  return t >= start - 0.01 && t <= end;
+}
+const setOpacity = (el, o) => { el.style.opacity = o; };
+
+// ---------- scene renderers (t is absolute seconds) ----------
+
+function s1(t) {
+  const tile = easeOut(prog(t, 0.2, 0.7));
+  $('logo').style.transform = `scale(${lerp(0.82, 1, tile)})`;
+  $('l-tile').style.opacity = tile;
+  const draw = easeInOut(prog(t, 0.5, 0.8));
+  for (const id of ['l-win', 'l-bar']) { $(id).style.strokeDasharray = 1; $(id).style.strokeDashoffset = 1 - draw; }
+  $('l-win').style.fillOpacity = draw;
+  setOpacity($('l-b1'), prog(t, 1.1, 0.3));
+  setOpacity($('l-b2'), prog(t, 1.2, 0.3));
+  // the cursor glides in along its tail; dots appear as it passes
+  const glide = easeOut(prog(t, 1.2, 0.9));
+  const cx = lerp(-38, 0, glide), cy = lerp(60, 0, glide);
+  $('l-cursor').style.transform = `translate(${cx}px, ${cy}px)`;
+  $('l-cursor').style.opacity = prog(t, 1.2, 0.2);
+  [['l-d3', 1.35], ['l-d2', 1.55], ['l-d1', 1.75]].forEach(([id, at]) => {
+    const k = easeOut(prog(t, at, 0.35));
+    const el = $(id);
+    el.style.opacity = k;
+    el.style.transformOrigin = `${el.getAttribute('cx')}px ${el.getAttribute('cy')}px`;
+    el.style.transform = `scale(${lerp(0.2, 1, k)})`;
+  });
+  appear($('s1-word'), t, 2.1);
+  appear($('s1-tag'), t, 2.6);
+}
+
+function s2(t) {
+  appear($('s2-h1'), t, 5.2);
+  appear($('s2-h2'), t, 5.6);
+  appear($('s2-agent'), t, 6.0);
+  appear($('s2-chrome'), t, 6.2);
+  setOpacity($('s2-tunnel'), easeOut(prog(t, 6.7, 0.4)) * (1 - 0.6 * prog(t, 7.9, 0.4)));
+  appear($('s2-tlabel'), t, 6.8);
+  $('s2-tlabel').style.opacity *= 1 - 0.5 * prog(t, 7.9, 0.4);
+  const x = easeOut(prog(t, 7.4, 0.3));
+  $('s2-x').style.opacity = x;
+  $('s2-x').style.transformOrigin = '280px 90px';
+  $('s2-x').style.transform = `scale(${lerp(1.6, 1, x)})`;
+  const net = easeInOut(prog(t, 8.0, 0.8));
+  $('s2-net').style.strokeDasharray = 1;
+  $('s2-net').style.strokeDashoffset = 1 - net;
+  appear($('s2-nlabel'), t, 8.4);
+  for (const [id, offset] of [['s2-p1', 0], ['s2-p2', 0.5]]) {
+    const k = ((t - 8.8) * 0.55 + offset) % 1;
+    const el = $(id);
+    el.setAttribute('cx', 10 + 540 * (k < 0 ? 0 : k));
+    el.style.opacity = t > 8.8 ? Math.sin(Math.PI * clamp(k)) : 0;
+  }
+  appear($('s2-cap'), t, 9.0);
+}
+
+function s3(t) {
+  appear($('s3-eye'), t, 11.2);
+  setOpacity($('s3-net'), easeOut(prog(t, 11.3, 0.6)));
+  setOpacity($('s3-netlabel'), easeOut(prog(t, 11.5, 0.6)));
+  const caps = [[12.9, 14.6], [14.6, 16.3], [16.3, 18.3]];
+  ['s3-n1', 's3-n2', 's3-n3'].forEach((id, i) => {
+    appear($(id), t, 11.6 + i * 0.25);
+    const active = t >= caps[i][0] && t < caps[i][1];
+    $(id).style.borderColor = active ? 'var(--accent)' : 'var(--line)';
+  });
+  caps.forEach(([a, b], i) => appear($(`s3-c${i + 1}`), t, a, i === 2 ? Infinity : b, 14, 0.4));
+  setOpacity($('s3-l1'), prog(t, 12.3, 0.4));
+  setOpacity($('s3-l2'), prog(t, 12.4, 0.4));
+  // packets: commands flow right-to-left (agent -> tab), results flow back
+  const flow = (id, phase, reverse) => {
+    const k = ((t - 12.6) * 0.7 + phase) % 1;
+    const el = $(id);
+    el.setAttribute('cx', reverse ? 120 - 120 * clamp(k) : 120 * clamp(k));
+    el.style.opacity = t > 12.6 ? Math.sin(Math.PI * clamp(k)) : 0;
+  };
+  flow('s3-a1', 0, true); flow('s3-a2', 0.5, false);
+  flow('s3-b1', 0.25, true); flow('s3-b2', 0.75, false);
+}
+
+const COMMAND = `$ npx tailbrowser -e '
+    await page.fill("#order", "A-1042")
+    await page.click("text=Look up")
+    return await page.textContent(".status")'`;
+const DEMO = { scale: 1040 / 1280, order: [392, 157], lookup: [609, 157], status: [332, 561] };
+
+function s4(t) {
+  appear($('s4-eye'), t, 18.7);
+  appear($('s4-term'), t, 18.9);
+  appear($('s4-browser'), t, 19.1);
+  // typing
+  const typed = Math.round(COMMAND.length * prog(t, 19.6, 3.6));
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  let html = `<span class="dim">$</span>${esc(COMMAND.slice(1, typed))}`;
+  const blink = Math.floor(t * 2) % 2 === 0;
+  const lines = [];
+  if (t > 23.6) lines.push('<span class="dim">→ relay ws://mac-mini:8787 (discovered)</span>');
+  if (t > 23.9) lines.push('<span class="dim">→ session 1 (new default, saved)</span>');
+  if (t > 26.2) lines.push('<span class="res">"Shipped"</span>');
+  if (lines.length) html += '\n' + lines.join('\n');
+  const idle = t < 23.3 || t > 26.2;
+  if (idle && (t < 23.3 ? true : blink)) html += t > 26.2 ? '\n<span class="dim">$</span> <span class="caret"></span>' : '<span class="caret"></span>';
+  $('s4-text').innerHTML = html;
+  // browser frames follow the agent's actions
+  setOpacity($('s4-f2'), prog(t, 24.55, 0.15));
+  setOpacity($('s4-f3'), prog(t, 25.55, 0.15));
+  // the agent's cursor: enters, moves to the field, then the button
+  const P = (x, y) => [x * DEMO.scale, y * DEMO.scale];
+  const start = P(760, 520), field = P(...DEMO.order), button = P(...DEMO.lookup);
+  let pos = start;
+  const m1 = easeInOut(prog(t, 23.9, 0.6)), m2 = easeInOut(prog(t, 24.8, 0.5));
+  pos = [lerp(start[0], field[0], m1), lerp(start[1], field[1], m1)];
+  if (t > 24.8) pos = [lerp(field[0], button[0], m2), lerp(field[1], button[1], m2)];
+  const cur = $('s4-cursor');
+  cur.style.opacity = prog(t, 23.7, 0.3) * (1 - prog(t, 27.4, 0.4));
+  const press = t > 25.35 && t < 25.55 ? 0.88 : 1;
+  cur.style.transform = `translate(${pos[0] - 4}px, ${pos[1] - 4}px) scale(${press})`;
+  // click ring on the button, then a highlight on the result
+  const ring = $('s4-ring');
+  const r1 = prog(t, 25.4, 0.5), r2 = prog(t, 26.0, 0.7);
+  if (t < 25.95) {
+    ring.style.left = `${button[0]}px`; ring.style.top = `${button[1]}px`;
+    ring.style.opacity = r1 > 0 ? 1 - r1 : 0; ring.style.transform = `scale(${lerp(0.4, 1.4, r1)})`;
+  } else {
+    const st = P(...DEMO.status);
+    ring.style.left = `${st[0]}px`; ring.style.top = `${st[1]}px`;
+    ring.style.opacity = 1 - r2; ring.style.transform = `scale(${lerp(0.5, 1.8, r2)})`;
+  }
+  appear($('s4-cap'), t, 26.6);
+}
+
+function s5(t) {
+  appear($('s5-h'), t, 31.2);
+  appear($('s5-popup'), t, 31.4);
+  const spans = [[31.5, 33.9], [33.9, 36.2], [36.2, 39]];
+  spans.forEach(([a, b], i) => {
+    const m = $(`s5-m${i + 1}`);
+    appear(m, t, 31.5 + i * 0.2);
+    const on = t >= a && t < b;
+    m.style.borderLeftColor = on ? 'var(--accent)' : 'var(--line)';
+    m.querySelector('h4').style.color = on ? 'var(--paper)' : 'var(--muted)';
+    m.querySelector('p').style.color = on ? 'var(--soft)' : 'var(--line)';
+  });
+  // crossfade, then hide the frame underneath (the screenshots differ in height)
+  setOpacity($('s5-p1'), t < 34.25 ? 1 : 0);
+  setOpacity($('s5-p2'), t < 36.55 ? prog(t, 33.9, 0.35) : 0);
+  setOpacity($('s5-p3'), prog(t, 36.2, 0.35));
+}
+
+function s6(t) {
+  appear($('s6-h'), t, 38.7);
+  for (let i = 1; i <= 4; i++) appear($(`s6-r${i}`), t, 39.1 + (i - 1) * 0.45, Infinity, 18);
+}
+
+function s7(t) {
+  const k = easeOut(prog(t, 43.6, 0.7));
+  $('s7-logo').style.opacity = k;
+  $('s7-logo').style.transform = `scale(${lerp(0.85, 1, k)})`;
+  appear($('s7-word'), t, 43.9);
+  appear($('s7-cmd'), t, 44.3);
+  appear($('s7-sub'), t, 44.7);
+  appear($('s7-url'), t, 45.1);
+  $('stage').style.opacity = 1 - prog(t, 47.4, 0.6);
+}
+
+function render(t) {
+  if (scene('s1', t, 0, 5)) s1(t);
+  if (scene('s2', t, 5, 11)) s2(t);
+  if (scene('s3', t, 11, 18.5)) s3(t);
+  if (scene('s4', t, 18.5, 31)) s4(t);
+  if (scene('s5', t, 31, 38.5)) s5(t);
+  if (scene('s6', t, 38.5, 43.5)) s6(t);
+  if (scene('s7', t, 43.5, DURATION)) s7(t);
+  if (t < 47.4) $('stage').style.opacity = 1;
+}
+
+window.ready = Promise.all([
+  document.fonts.ready,
+  ...[...document.images].map((img) => img.decode().catch(() => {})),
+]);
+render(0);
+if (location.hash === '#play') {
+  const t0 = performance.now();
+  const tick = () => { const t = (performance.now() - t0) / 1000; render(t % DURATION); requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+}
+</script>
+</body>
+</html>
