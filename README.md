@@ -135,7 +135,7 @@ npm run video             # capture real footage, then render media/tailbrowser.
 npm run build:og          # render the social preview image, media/og-image.png
 ```
 
-The product website is in `docs/`. It is one static page with no build step. GitHub Pages serves it from the `/docs` folder at [tailbrowser.nesin.io](https://tailbrowser.nesin.io) (see `docs/CNAME`). `npm run video` and `npm run build:icons` update the files in `docs/assets/`.
+The product website is in `website/`. It is one static page with no build step. Cloudflare Pages publishes it to [tailbrowser.nesin.io](https://tailbrowser.nesin.io), with `website` as the build output directory and no build command. `npm run video`, `npm run build:icons` and `npm run build:og` update the files in `website/assets/`.
 
 `agent/fake-extension.mjs` simulates the extension with a real headless Chromium. This lets you test the relay without a Chrome window.
 
@@ -162,7 +162,7 @@ agent/
   fake-extension.mjs   test replacement for the extension
 lib/                   functions that the relay and the agent both use
 extension/             MV3 extension: service worker, popup, keep-alive document, icons
-docs/                  product website (static, GitHub Pages: tailbrowser.nesin.io)
+website/               product website (static, published to tailbrowser.nesin.io)
 media/                 product video and the files that make it
 ```
 

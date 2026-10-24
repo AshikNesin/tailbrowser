@@ -2,7 +2,7 @@
 // Render composition.html to an MP4, frame by frame (deterministic: each
 // frame is render(t) for its exact timestamp, then piped into ffmpeg).
 //
-// Run: node media/video/render.mjs                 -> media/tailbrowser.mp4 + poster (also copied to docs/assets/)
+// Run: node media/video/render.mjs                 -> media/tailbrowser.mp4 + poster (also copied to website/assets/)
 //      node media/video/render.mjs --stills 3,9,25 -> PNG stills for review
 // Needs Chromium (CHROME_BIN or Playwright's cache) and ffmpeg with libx264 (libvpx-vp9 optional).
 
@@ -57,9 +57,9 @@ if (stills) {
   if (code !== 0) throw new Error(`ffmpeg exited with ${code}`);
   // poster: the demo moment with the result on screen
   fs.writeFileSync(path.join(OUT_DIR, 'tailbrowser-poster.jpg'), await frameAt(27.5));
-  // the website (docs/) serves its own copies, plus a VP9 WebM for browsers
+  // the website (website/) serves its own copies, plus a VP9 WebM for browsers
   // without H.264 (open-source Chromium builds)
-  const site = path.resolve(HERE, '../../docs/assets');
+  const site = path.resolve(HERE, '../../website/assets');
   fs.mkdirSync(site, { recursive: true });
   for (const f of ['tailbrowser.mp4', 'tailbrowser-poster.jpg']) fs.copyFileSync(path.join(OUT_DIR, f), path.join(site, f));
   await encodeWebm(out, path.join(site, 'tailbrowser.webm'));

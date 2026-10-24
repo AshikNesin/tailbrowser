@@ -18,5 +18,5 @@ await page.evaluate(() => Promise.all([document.fonts.ready, ...[...document.ima
 await page.screenshot({ path: OUT });
 await browser.close();
 // the website serves a copy for its og:image tag
-fs.copyFileSync(OUT, path.resolve(HERE, '../../docs/assets/og-image.png'));
+fs.copyFileSync(OUT, path.resolve(HERE, '../../website/assets/og-image.png'));
 console.log(`  ${path.relative(process.cwd(), OUT)} (${(fs.statSync(OUT).size / 1024).toFixed(0)} KB)`);
