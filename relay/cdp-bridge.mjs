@@ -158,7 +158,7 @@ export class CdpBridge {
       case 'Target.setDiscoverTargets':
         return {};
       case 'Target.setAutoAttach':
-        client.autoAttach = true;
+        client.autoAttach = !!params.autoAttach;
         return {};
       case 'Target.getBrowserContexts':
         return { browserContextIds: [DEFAULT_CONTEXT_ID] };
@@ -194,7 +194,7 @@ export class CdpBridge {
     if (method === 'Target.setDiscoverTargets') {
       client.send({ method: 'Target.targetCreated', params: { targetInfo: BROWSER_TARGET_INFO } });
       for (const target of targets) client.targetCreated(target);
-    } else if (method === 'Target.setAutoAttach') {
+    } else if (method === 'Target.setAutoAttach' && client.autoAttach) {
       for (const target of targets) client.attach(target);
     }
   }

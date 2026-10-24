@@ -35,6 +35,19 @@ const { port, bind, token, allowList } = config;
 if (config.bindSource === 'tailscale') console.log('[relay] auto-detected tailscale IP:', bind);
 if (config.bindSource === 'loopback') console.log('[relay] no tailscale IP found, binding loopback. Pass --bind <ip> or install the tailscale CLI.');
 if (!token) console.log('[relay] tokenless mode: tailnet membership is the only gate (fine for a personal tailnet)');
+if (config.bindSource === 'flag' && exposedBeyondTailnet(bind) && !token && !allowList.some((e) => !e.endsWith('/0'))) {
+  console.log(`[relay] WARNING: bound to ${bind} with no --token and no --allow; devices outside your tailnet may be able to connect`);
+}
+
+// Does this bind address accept connections from beyond loopback and the
+// tailnet? Hostnames can't be classified without resolving them: no warning.
+function exposedBeyondTailnet(address) {
+  const a = address.toLowerCase();
+  if (a === '0.0.0.0' || a === '::') return true; // all interfaces
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(a)) return !/^(127\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(a); // loopback, tailnet CGNAT
+  if (a.includes(':')) return !(a === '::1' || a.startsWith('fd7a:115c:a1e0:')); // loopback, tailnet IPv6
+  return false;
+}
 
 // ---------- process-level safety net ----------
 // The relay is a daemon: a surprise exception must never take it down. Log

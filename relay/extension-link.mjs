@@ -88,6 +88,7 @@ export class ExtensionLink extends EventEmitter {
     }, PING_MS);
 
     ws.on('message', (data) => {
+      if (this.#conn !== conn) return; // a replaced socket's late frames must not resurrect its targets
       conn.lastSeen = Date.now();
       // every frame is isolated: a malformed message hurts no one
       try { this.#onMessage(conn, String(data)); } catch (e) {

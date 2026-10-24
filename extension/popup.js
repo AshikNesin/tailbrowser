@@ -99,9 +99,15 @@ function renderCurrentTab() {
   hint.classList.toggle('hidden', !hint.textContent);
 }
 
+const scopeButtons = [...document.querySelectorAll('[data-scope]')];
+let scopeBusy = false;
+let queuedScope = null; // latest choice made while a change was still running
+
 function renderScope() {
-  for (const button of document.querySelectorAll('[data-scope]')) {
-    button.setAttribute('aria-checked', String(button.dataset.scope === status.scopeMode));
+  for (const button of scopeButtons) {
+    const on = button.dataset.scope === status.scopeMode;
+    button.setAttribute('aria-checked', String(on));
+    button.tabIndex = on ? 0 : -1; // radio group: one tab stop, arrows move within
   }
   $('allowlistBox').classList.toggle('hidden', status.scopeMode !== 'allowlist');
 }
@@ -211,14 +217,42 @@ $('currentAction').onclick = () => {
   act($('currentAction'), () => call(shared ? 'optOut' : 'optIn', { tabId: currentTab.id }));
 };
 
-for (const button of document.querySelectorAll('[data-scope]')) {
-  button.onclick = () => {
-    const scopeMode = button.dataset.scope;
-    if (scopeMode === status.scopeMode) return;
-    if (scopeMode === 'full' && !confirm('Give agents access to every tab in this browser, including opening and closing tabs?')) return;
-    act(button, () => call('setScope', { scopeMode }));
-  };
+// One scope change at a time: overlapping changes could finish out of order
+// and leave the wider scope's attachments in place. A choice made meanwhile is
+// queued (latest wins), so the end state always matches the user's last pick.
+async function selectScope(scopeMode, confirmed = false) {
+  if (!confirmed && scopeMode === 'full' && status.scopeMode !== 'full'
+    && !confirm('Give agents access to every tab in this browser, including opening and closing tabs?')) return;
+  if (scopeBusy) { queuedScope = scopeMode; return; }
+  if (scopeMode === status.scopeMode) return;
+  scopeBusy = true;
+  document.querySelector('.modes').setAttribute('aria-busy', 'true');
+  try {
+    const r = await call('setScope', { scopeMode });
+    actionError = r && r.ok === false ? { text: r.error, until: Date.now() + 8000 } : null;
+    await refresh();
+  } finally {
+    // release the lock and hand over to the queued choice in one turn, so no
+    // click can start a change in between
+    const next = queuedScope;
+    queuedScope = null;
+    scopeBusy = false;
+    document.querySelector('.modes').removeAttribute('aria-busy');
+    if (next) selectScope(next, true); // its confirm (if any) happened when it was queued
+  }
 }
+
+scopeButtons.forEach((button, i) => {
+  button.onclick = () => selectScope(button.dataset.scope);
+  button.onkeydown = (e) => {
+    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const next = scopeButtons[(i + step + scopeButtons.length) % scopeButtons.length];
+    next.focus();
+    selectScope(next.dataset.scope);
+  };
+});
 
 $('saveAllowlist').onclick = () => {
   const allowlist = $('allowlist').value.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);

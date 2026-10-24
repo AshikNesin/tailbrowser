@@ -93,6 +93,9 @@ async function handleLine(line) {
   try { msg = JSON.parse(line); } catch {
     return send({ id: null, error: { code: -32700, message: 'parse error' } });
   }
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) {
+    return send({ id: null, error: { code: -32600, message: 'invalid request' } });
+  }
   const isRequest = msg.id !== undefined && msg.id !== null; // notifications get no reply
   const handler = handlers[msg.method];
   if (!handler) {

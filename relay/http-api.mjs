@@ -22,7 +22,12 @@ function readBody(req) {
     const chunks = [];
     req.on('data', (chunk) => {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) { reject(new HttpError(413, 'body too large')); req.destroy(); return; }
+      if (size > MAX_BODY_BYTES) {
+        // stop buffering but keep draining, so the 413 answer can still be delivered
+        chunks.length = 0;
+        reject(new HttpError(413, 'body too large'));
+        return;
+      }
       chunks.push(chunk);
     });
     req.on('end', () => resolve(Buffer.concat(chunks).toString()));
@@ -92,12 +97,13 @@ export function createHttpHandler({ auth, sessions, runner, extension }) {
   };
 
   return async function handle(req, res) {
-    const url = new URL(req.url, 'http://relay');
+    let url;
     const send = (status, body) => {
       res.writeHead(status, { 'content-type': 'application/json' });
       res.end(JSON.stringify(body));
     };
     try {
+      try { url = new URL(req.url, 'http://relay'); } catch { throw new HttpError(400, 'invalid request target'); }
       if (!auth.ipAllowed(req)) {
         log('rejected', req.socket.remoteAddress, '(not in --allow list)');
         return send(403, { error: 'source ip not allowed' });
@@ -109,7 +115,8 @@ export function createHttpHandler({ auth, sessions, runner, extension }) {
       const [status, body] = await route(req, url);
       send(status, body);
     } catch (e) {
-      log('http handler error', req.method, url.pathname, errorMessage(e));
+      log('http handler error', req.method, url?.pathname ?? req.url, errorMessage(e));
+      if (e.status === 413) res.setHeader('connection', 'close'); // don't keep draining an oversized upload
       if (!res.headersSent) return send(e.status || 500, { ok: false, error: errorMessage(e) });
       try { res.end(); } catch {}
     }

@@ -4,7 +4,7 @@
 //
 // Run: node media/video/render.mjs                 -> media/tailbrowser.mp4 + poster (also copied to docs/assets/)
 //      node media/video/render.mjs --stills 3,9,25 -> PNG stills for review
-// Needs Chromium (CHROME_BIN or Playwright's cache) and ffmpeg with libx264.
+// Needs Chromium (CHROME_BIN or Playwright's cache) and ffmpeg with libx264 (libvpx-vp9 optional).
 
 import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
@@ -62,9 +62,27 @@ if (stills) {
   const site = path.resolve(HERE, '../../docs/assets');
   fs.mkdirSync(site, { recursive: true });
   for (const f of ['tailbrowser.mp4', 'tailbrowser-poster.jpg']) fs.copyFileSync(path.join(OUT_DIR, f), path.join(site, f));
-  const webm = spawn('ffmpeg', ['-y', '-loglevel', 'error', '-i', out, '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '34',
-    '-row-mt', '1', '-deadline', 'good', path.join(site, 'tailbrowser.webm')], { stdio: 'inherit' });
-  if ((await new Promise((r) => webm.on('close', r))) !== 0) throw new Error('webm encode failed');
+  await encodeWebm(out, path.join(site, 'tailbrowser.webm'));
   console.log(`\r  ${path.relative(process.cwd(), out)} (${(fs.statSync(out).size / 1e6).toFixed(1)} MB, ${duration}s)`);
 }
 await browser.close();
+
+// VP9 is optional: without it, drop any stale WebM so the site falls back to
+// the (current) MP4 instead of serving an old video
+async function encodeWebm(input, output) {
+  const run = (args) => new Promise((resolve) => {
+    const p = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'inherit'] });
+    let stdout = '';
+    p.stdout.on('data', (d) => { stdout += d; });
+    p.on('close', (code) => resolve({ code, stdout }));
+  });
+  const { stdout } = await run(['-hide_banner', '-encoders']);
+  if (!/libvpx-vp9/.test(stdout)) {
+    fs.rmSync(output, { force: true });
+    console.warn('\n  ffmpeg has no libvpx-vp9 encoder: skipped the WebM; the site will serve the MP4 only');
+    return;
+  }
+  const { code } = await run(['-y', '-loglevel', 'error', '-i', input, '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '34',
+    '-row-mt', '1', '-deadline', 'good', output]);
+  if (code !== 0) throw new Error('webm encode failed');
+}
