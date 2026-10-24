@@ -135,7 +135,7 @@ npm run video             # capture real footage, then render media/tailbrowser.
 npm run build:og          # render the social preview image, media/og-image.png
 ```
 
-The product website is in `website/`. It is one static page with no build step. A GitHub Actions workflow (`.github/workflows/website.yml`) publishes it to [tailbrowser.nesin.io](https://tailbrowser.nesin.io) when `website/` changes on `main`. `npm run video`, `npm run build:icons` and `npm run build:og` update the files in `website/assets/`.
+The product website is in `website/`. It is one static page with no build step. Cloudflare Pages publishes it to [tailbrowser.nesin.io](https://tailbrowser.nesin.io), with `website` as the build output directory and no build command. `npm run video`, `npm run build:icons` and `npm run build:og` update the files in `website/assets/`.
 
 `agent/fake-extension.mjs` simulates the extension with a real headless Chromium. This lets you test the relay without a Chrome window.
 
