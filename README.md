@@ -4,6 +4,8 @@
 
 tailbrowser lets AI agents control a real Chrome browser through your **Tailscale network** (tailnet). You select the pages that the agents can use, or you give them the full browser.
 
+Website: [tailbrowser.nesin.io](https://tailbrowser.nesin.io)
+
 ```
 Chrome + extension ──ws──► relay :8787 ◄──ws── agents (CLI / MCP / npx)
    (Mac mini etc.)       (any tailnet box)
@@ -133,7 +135,7 @@ npm run video             # capture real footage, then render media/tailbrowser.
 npm run build:og          # render the social preview image, media/og-image.png
 ```
 
-The product website is in `docs/`. It is one static page with no build step. To publish it with GitHub Pages, select the `/docs` folder in the repository settings. `npm run video` and `npm run build:icons` update the files in `docs/assets/`.
+The product website is in `docs/`. It is one static page with no build step. GitHub Pages serves it from the `/docs` folder at [tailbrowser.nesin.io](https://tailbrowser.nesin.io) (see `docs/CNAME`). `npm run video` and `npm run build:icons` update the files in `docs/assets/`.
 
 `agent/fake-extension.mjs` simulates the extension with a real headless Chromium. This lets you test the relay without a Chrome window.
 
@@ -160,7 +162,7 @@ agent/
   fake-extension.mjs   test replacement for the extension
 lib/                   functions that the relay and the agent both use
 extension/             MV3 extension: service worker, popup, keep-alive document, icons
-docs/                  product website (static, for GitHub Pages)
+docs/                  product website (static, GitHub Pages: tailbrowser.nesin.io)
 media/                 product video and the files that make it
 ```
 
