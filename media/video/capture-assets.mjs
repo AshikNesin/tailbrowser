@@ -52,12 +52,17 @@ if (await answers()) {
   console.error(`a relay is already running on :${RELAY_PORT}; stop it before capturing`);
   process.exit(1);
 }
-const relay = spawn('node', ['relay/relay.mjs', '--port', String(RELAY_PORT), '--bind', '127.0.0.1'], { cwd: ROOT, stdio: 'ignore' });
-let relayExited = false;
-relay.on('exit', () => { relayExited = true; });
+const relay = spawn('node', ['relay/relay.mjs', '--port', String(RELAY_PORT), '--bind', '127.0.0.1'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] });
 process.on('exit', () => relay.kill());
-for (let i = 0; i < 40 && !relayExited && !(await answers()); i++) await wait(250);
-if (relayExited || !(await answers())) { console.error('the capture relay did not start'); process.exit(1); }
+// ready only when OUR child says it is listening (another relay's /health proves nothing)
+const started = await new Promise((resolve) => {
+  let out = '';
+  relay.stdout.on('data', (d) => { out += d; if (out.includes('relay is up')) resolve(true); });
+  relay.on('exit', () => resolve(false));
+  setTimeout(() => resolve(false), 10_000);
+});
+if (!started) { console.error('the capture relay did not start'); process.exit(1); }
+relay.stdout.resume(); // keep draining its log
 
 const ext = path.join(ROOT, 'extension');
 const context = await chromium.launchPersistentContext(fs.mkdtempSync(path.join(os.tmpdir(), 'tb-video-')), {

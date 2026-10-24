@@ -220,8 +220,9 @@ $('currentAction').onclick = () => {
 // One scope change at a time: overlapping changes could finish out of order
 // and leave the wider scope's attachments in place. A choice made meanwhile is
 // queued (latest wins), so the end state always matches the user's last pick.
-async function selectScope(scopeMode) {
-  if (scopeMode === 'full' && status.scopeMode !== 'full' && !confirm('Give agents access to every tab in this browser, including opening and closing tabs?')) return;
+async function selectScope(scopeMode, confirmed = false) {
+  if (!confirmed && scopeMode === 'full' && status.scopeMode !== 'full'
+    && !confirm('Give agents access to every tab in this browser, including opening and closing tabs?')) return;
   if (scopeBusy) { queuedScope = scopeMode; return; }
   if (scopeMode === status.scopeMode) return;
   scopeBusy = true;
@@ -229,15 +230,15 @@ async function selectScope(scopeMode) {
   try {
     const r = await call('setScope', { scopeMode });
     actionError = r && r.ok === false ? { text: r.error, until: Date.now() + 8000 } : null;
+    await refresh();
   } finally {
-    scopeBusy = false;
-    document.querySelector('.modes').removeAttribute('aria-busy');
-  }
-  await refresh();
-  if (queuedScope) {
+    // release the lock and hand over to the queued choice in one turn, so no
+    // click can start a change in between
     const next = queuedScope;
     queuedScope = null;
-    selectScope(next);
+    scopeBusy = false;
+    document.querySelector('.modes').removeAttribute('aria-busy');
+    if (next) selectScope(next, true); // its confirm (if any) happened when it was queued
   }
 }
 

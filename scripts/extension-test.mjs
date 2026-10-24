@@ -169,6 +169,7 @@ console.log('▸ 4. narrowing scope detaches');
 
   // keyboard: the scope group is one tab stop, arrows move the selection
   await popup.reload();
+  await popup.waitForFunction(() => document.querySelector('[data-scope][aria-checked="true"]')); // first status render
   const stops = await popup.evaluate(() => [...document.querySelectorAll('[data-scope]')].map((b) => b.tabIndex));
   check(JSON.stringify(stops) === '[0,-1,-1]', 'scope options form one tab stop', JSON.stringify(stops));
   await popup.focus('[data-scope="tab"]');

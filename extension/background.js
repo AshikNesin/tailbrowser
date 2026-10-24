@@ -234,9 +234,11 @@ async function advertise(tabId, targetId) {
 }
 
 // may this tab be attached right now? (current scope, not revoked, not unshared by the user)
+// Flags are read after the await: a revoke or opt-out during the lookup counts.
 async function stillAllowed(tabId) {
-  if (revoked || dismissed.has(tabId)) return false;
-  try { return inScope(await chrome.tabs.get(tabId)); } catch { return false; }
+  let tab;
+  try { tab = await chrome.tabs.get(tabId); } catch { return false; }
+  return !revoked && !dismissed.has(tabId) && inScope(tab);
 }
 
 function tabForTarget(targetId) {
