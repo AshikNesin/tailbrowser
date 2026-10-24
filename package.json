@@ -25,7 +25,8 @@
     "smoke": "bash scripts/smoke.sh",
     "stability": "node scripts/stability-test.mjs",
     "build:icons": "node scripts/build-icons.mjs",
-    "video": "node media/video/capture-assets.mjs && node media/video/render.mjs"
+    "video": "node media/video/capture-assets.mjs && node media/video/render.mjs",
+    "build:og": "node media/og/render.mjs"
   },
   "keywords": [
     "tailscale",

@@ -4,15 +4,6 @@
 
 tailbrowser lets AI agents control a real Chrome browser through your **Tailscale network** (tailnet). You select the pages that the agents can use, or you give them the full browser.
 
-**Status:** M1.1. tailbrowser is in daily use with a real Chrome browser. M1.1 has these features:
-
-- A relay that isolates faults and repairs its Playwright connection automatically
-- Stateful snippet sessions
-- A CLI and an MCP server
-- Automatic discovery of the relay
-- Background keep-alive
-- Three scope modes
-
 ```
 Chrome + extension ──ws──► relay :8787 ◄──ws── agents (CLI / MCP / npx)
    (Mac mini etc.)       (any tailnet box)
@@ -22,7 +13,7 @@ Chrome + extension ──ws──► relay :8787 ◄──ws── agents (CLI /
 
 [![tailbrowser product video](media/tailbrowser-poster.jpg)](media/tailbrowser.mp4)
 
-The video is 48 seconds long. The browser and popup frames are real captures from the extension and the relay. To make the video again, run `npm run video`.
+The browser and popup frames in the video are real captures from the extension and the relay.
 
 ## Quick start
 
@@ -52,7 +43,7 @@ On the computer that runs Chrome, do these steps:
 6. Connect the extension to the relay:
    - If the relay is on the same computer, click **Find local relay**.
    - If the relay is on a different computer, type `ws://<relay-ip>:8787` in **Relay URL**. Then click **Save & connect**.
-7. To share the current tab, click **Share with agents**.
+7. To share the current tab, turn on **This tab**.
 8. To share more tabs, select a different scope in **Agent access**.
 
 ### 3. Control Chrome from your tailnet
@@ -94,6 +85,7 @@ tailbrowser -s 2 -e 'code'       run a snippet in a specific session
 tailbrowser -e 'code' --new      run a snippet in a new session
 tailbrowser session new|list|reset
 tailbrowser scope | health
+tailbrowser --mcp                run the MCP server (stdio)
 ```
 
 ## Security
@@ -113,6 +105,21 @@ tailbrowser has these security controls:
 - **Revoke agent access** closes the relay connection and detaches all tabs. The extension stays disconnected after a browser restart. To connect again, click **Reconnect agent**.
 - An agent can create a tab with `newPage()` only in **Entire browser** mode. In the other modes, the relay returns a `TB_SCOPE` error.
 
+## Reliability
+
+The relay can operate without supervision for many weeks:
+
+- A request, a WebSocket frame, or a snippet cannot stop the relay process. The relay returns an error and continues to operate.
+- When Chrome restarts, the network changes, or the computer sleeps, the relay connects to the extension again. You do not have to restart the relay.
+- If an agent command cannot complete, the agent receives a `TB_ERR` or `TB_TIMEOUT` error immediately.
+- Each log line has a timestamp. `curl <relay>/health` shows the relay status.
+
+The extension stays connected when Chrome is in the background. You do not have to configure this:
+
+- A hidden offscreen document keeps the service worker active.
+- If Chrome stops the worker, an alarm starts it again.
+- A ping finds connections that stopped after the computer slept, and replaces them.
+
 ## Development
 
 Use these commands:
@@ -123,6 +130,7 @@ npm run test:extension    # load the real extension into Chromium and test it
 npm run smoke             # run a quick Playwright demo through the relay
 npm run build:icons       # make the PNG icons from the SVG files in extension/icons/
 npm run video             # capture real footage, then render media/tailbrowser.mp4
+npm run build:og          # render the social preview image, media/og-image.png
 ```
 
 The product website is in `docs/`. It is one static page with no build step. To publish it with GitHub Pages, select the `/docs` folder in the repository settings. `npm run video` and `npm run build:icons` update the files in `docs/assets/`.
@@ -155,50 +163,6 @@ extension/             MV3 extension: service worker, popup, keep-alive document
 docs/                  product website (static, for GitHub Pages)
 media/                 product video and the files that make it
 ```
-
-## Stability
-
-tailbrowser can operate without supervision for many weeks. Browsers and computers can disconnect and connect again, but the relay must not stop.
-
-**Fault isolation:** A request, a WebSocket frame, or a snippet cannot stop the relay process. The relay does these actions:
-
-- It returns `400` for incorrect JSON.
-- It ignores unknown message types.
-- It drops incorrect frames.
-- It records handler errors in the log (`UNCAUGHT (survived)`) and continues to operate.
-
-`scripts/stability-test.mjs` makes sure that the earlier crash bugs do not occur again. These bugs were incorrect `/execute` bodies and `targetInfoChanged` race conditions.
-
-**Automatic repair of the Playwright connection:** When the extension connects again, the relay replaces its internal Playwright connection. This occurs after a Chrome restart, a network problem, or a computer sleep. Before this change, one extension disconnection made the connection unusable until you restarted the relay. This was the main cause of failures.
-
-**Fast failure:** If an agent command cannot complete, the agent receives a `TB_ERR` or `TB_TIMEOUT` error in milliseconds. The agent does not wait 30 seconds or more. `newPage()` and `attachToTarget` use real CDP semantics (`sessionId` in responses, real target IDs). This lets the Playwright fast paths operate correctly.
-
-**Diagnosis:** Each log line has a timestamp. A watchdog shows a warning when a synchronous snippet stops the event loop. `curl <relay>/health` gives the relay status in one round trip.
-
-To run the regression tests, use `npm test`. The tests examine these conditions:
-
-- Crash isolation
-- Recovery after the extension disconnects, without a relay restart
-- `newPage()` and `page.close()` from start to end
-- Many snippets at the same time
-- Incorrect WebSocket frames
-- Session state after a snippet fails
-- Session IDs that are the same
-- MCP protocol edge cases
-- Token mode
-- A clear message when the port is in use (`EADDRINUSE`)
-
-## Background operation
-
-Chrome stops an MV3 service worker approximately 30 seconds after its last event. Since Chrome 116, WebSocket traffic is **not** an event. As a result, the extension lost the relay connection when Chrome was in the background.
-
-tailbrowser uses three mechanisms to prevent this problem. You do not have to configure them.
-
-1. **Offscreen document and runtime port** (primary mechanism): A hidden offscreen document sends a message to the service worker every 20 seconds through a `chrome.runtime` port. Each message resets the idle timer of the worker. Chrome does not slow down offscreen documents. As a result, this mechanism operates when Chrome is fully in the background.
-2. **`chrome.alarms`** (backup mechanism, every 30 seconds): Chrome can stop the worker for other causes, for example low memory or a crash. In this condition, the alarm starts the worker again. The worker then connects to the relay again and sends the list of attached targets. `chrome.debugger` attachments continue after a worker restart. The extension keeps its settings and shared tabs in `chrome.storage`.
-3. **Application-level WebSocket ping** (a ping every 20 seconds, a 75-second limit): This mechanism finds half-open connections after the computer sleeps or the network changes. It then replaces the connection. The relay uses the same method in the opposite direction. If the extension is not connected, the relay returns `TB_ERR: extension not connected` immediately. It does not wait 30 seconds on a dead connection.
-
-The popup shows the keep-alive status (`keep-alive ✓ · heard Ns ago`).
 
 ## Acknowledgements
 
