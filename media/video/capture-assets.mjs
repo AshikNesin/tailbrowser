@@ -46,9 +46,18 @@ const site = http.createServer((req, res) => {
 await new Promise((r) => site.listen(80, '127.0.0.1', r));
 const DEMO = `http://${DEMO_HOST}/orders`;
 
+// never drive someone's running relay: it would replace their extension connection
+const answers = async () => { try { return (await fetch(`${RELAY}/health`)).ok; } catch { return false; } };
+if (await answers()) {
+  console.error(`a relay is already running on :${RELAY_PORT}; stop it before capturing`);
+  process.exit(1);
+}
 const relay = spawn('node', ['relay/relay.mjs', '--port', String(RELAY_PORT), '--bind', '127.0.0.1'], { cwd: ROOT, stdio: 'ignore' });
+let relayExited = false;
+relay.on('exit', () => { relayExited = true; });
 process.on('exit', () => relay.kill());
-for (let i = 0; i < 40; i++) { try { if ((await fetch(`${RELAY}/health`)).ok) break; } catch {} await wait(250); }
+for (let i = 0; i < 40 && !relayExited && !(await answers()); i++) await wait(250);
+if (relayExited || !(await answers())) { console.error('the capture relay did not start'); process.exit(1); }
 
 const ext = path.join(ROOT, 'extension');
 const context = await chromium.launchPersistentContext(fs.mkdtempSync(path.join(os.tmpdir(), 'tb-video-')), {
