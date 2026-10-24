@@ -136,6 +136,46 @@ console.log('▸ 4. narrowing scope detaches');
   await send({ t: 'setScope', scopeMode: 'tab' });
   const st = await status();
   check(st.attached.length === 1 && st.attached[0].tabId === siteTabId, 'back to tab mode: only the opted-in tab remains', JSON.stringify(st.attached));
+
+  // overlapping changes: widen, then narrow before the widen has finished attaching
+  for (let i = 0; i < 2; i++) await context.newPage().then((p) => p.goto(`${SITE}/extra-${i}`));
+  // Narrow while attaches are in flight. Headless attaches finish in a few ms,
+  // so slow chrome.debugger.attach down inside the worker to hold the window open.
+  await worker.evaluate(() => {
+    globalThis.__realAttach = chrome.debugger.attach.bind(chrome.debugger);
+    chrome.debugger.attach = async (...args) => { await new Promise((r) => setTimeout(r, 300)); return globalThis.__realAttach(...args); };
+  });
+  const widen = send({ t: 'setScope', scopeMode: 'full' });
+  await wait(100); // the first slowed attach is now in flight
+  await send({ t: 'setScope', scopeMode: 'tab' });
+  await widen;
+  await wait(1200); // let every in-flight attach finish
+  await worker.evaluate(() => { chrome.debugger.attach = globalThis.__realAttach; });
+  const leaked = (await status()).attached.filter((t) => t.tabId !== siteTabId);
+  check(!leaked.length, 'no tab stays attached when the scope narrows mid-attach', JSON.stringify(leaked.map((t) => t.url)));
+  const after = await status();
+  // tabs this extension really holds a debugger on: only those accept its CDP commands
+  // (getTargets().attached is no good here, since Playwright is attached to every page too)
+  const debugged = await popup.evaluate(async () => {
+    let held = 0;
+    for (const tab of await chrome.tabs.query({})) {
+      try { await chrome.debugger.sendCommand({ tabId: tab.id }, 'Runtime.evaluate', { expression: '1' }); held++; } catch {}
+    }
+    return held;
+  });
+  check(after.attached.length === 1 && after.attached[0].tabId === siteTabId && debugged === 1,
+    'overlapping full→tab change leaves only the opted-in tab attached', `${JSON.stringify(after.attached.map((t) => t.url))}, debugger attached to ${debugged}`);
+  check((await health()).targets === 1, 'relay sees only that tab');
+
+  // keyboard: the scope group is one tab stop, arrows move the selection
+  await popup.reload();
+  const stops = await popup.evaluate(() => [...document.querySelectorAll('[data-scope]')].map((b) => b.tabIndex));
+  check(JSON.stringify(stops) === '[0,-1,-1]', 'scope options form one tab stop', JSON.stringify(stops));
+  await popup.focus('[data-scope="tab"]');
+  await popup.keyboard.press('ArrowDown');
+  check(await until(async () => (await status()).scopeMode === 'allowlist', 8000), 'ArrowDown selects the next scope (Allowlist)');
+  await popup.keyboard.press('ArrowUp');
+  check(await until(async () => (await status()).scopeMode === 'tab', 8000), 'ArrowUp selects it back (Tabs I pick)');
 }
 
 console.log('▸ 5. allowlist mode: auto-attach on navigation');

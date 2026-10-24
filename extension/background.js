@@ -177,6 +177,13 @@ async function doAttach(tabId) {
     await chrome.debugger.attach(debuggee, '1.3');
   }
   const targetId = await resolveTargetId(tabId);
+  // The scope may have narrowed, or access been revoked, while we were
+  // attaching; reconcileScope/revoke could not see this tab yet. Recheck now,
+  // synchronously before recording it, so nothing slips through.
+  if (!(await stillAllowed(tabId))) {
+    try { await chrome.debugger.detach(debuggee); } catch {}
+    throw new Error('TB_SCOPE: tab left the scope while attaching');
+  }
   attached.set(tabId, targetId);
   persistSession();
   refreshBadge();
@@ -221,8 +228,15 @@ async function detachTab(tabId, reason) {
 async function advertise(tabId, targetId) {
   try {
     const tab = await chrome.tabs.get(tabId);
+    if (attached.get(tabId) !== targetId) return; // detached while we looked the tab up
     send({ t: 'attached', tabId, targetId, url: tab.url || '', title: tab.title || '' });
   } catch {}
+}
+
+// may this tab be attached right now? (current scope, not revoked, not unshared by the user)
+async function stillAllowed(tabId) {
+  if (revoked || dismissed.has(tabId)) return false;
+  try { return inScope(await chrome.tabs.get(tabId)); } catch { return false; }
 }
 
 function tabForTarget(targetId) {
