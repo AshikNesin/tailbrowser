@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- tailbrowser icon (48px and up): an agent's cursor gliding into a browser
+       window, trailing a dotted "tail": remote control over the tailnet.
+       Colors follow Tailscale's palette: warm near-black, warm off-white,
+       warm grays, and a muted take on their brick-red accent (#d04841)
+       for the one thing that acts.
+       PNGs are generated from this file: npm run build:icons -->
+  <!-- tile, with a warm-gray rim so it doesn't vanish on dark toolbars -->
+  <rect x="1" y="1" width="126" height="126" rx="29" fill="#1f1e1e" stroke="#444342" stroke-width="2"/>
+  <!-- browser window -->
+  <rect x="20" y="18" width="88" height="64" rx="13" fill="#2e2d2d" stroke="#f9f7f6" stroke-width="6"/>
+  <path d="M20 37h88" stroke="#f9f7f6" stroke-width="6"/>
+  <circle cx="33" cy="27.5" r="3.2" fill="#f9f7f6"/>
+  <circle cx="44" cy="27.5" r="3.2" fill="#706e6d"/>
+  <!-- tail: the path the agent took to get here, fading through warm grays -->
+  <circle cx="44" cy="66" r="5.6" fill="#f9f7f6"/>
+  <circle cx="32" cy="93" r="4.4" fill="#a8a5a3"/>
+  <circle cx="21" cy="110" r="3.3" fill="#706e6d"/>
+  <!-- agent cursor, breaking out of the frame -->
+  <path d="M58 50v50l12.5-11.5 9.5 19.5 10.5-5-9.5-19H99z" fill="#b8554c" stroke="#f9f7f6" stroke-width="6" stroke-linejoin="round" paint-order="stroke"/>
+</svg>

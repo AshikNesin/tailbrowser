@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// demo.mjs — M0 end-to-end validation: connect Playwright through the relay
+// demo.mjs: end-to-end validation. connect Playwright through the relay
 // and drive the (fake or real) extension's browser.
 //
 // Usage: node demo.mjs [ws://127.0.0.1:8787]
@@ -27,19 +27,18 @@ console.log('✓ navigated:', page.url());
 const title = await page.title();
 console.log('✓ title:', title);
 
-const h1 = await page.textContent('h1');
-console.log('✓ h1:', h1.trim());
-
 const html = await page.content();
 console.log('✓ content length:', html.length);
 
-const link = page.locator('a').first();
-console.log('✓ link href:', await link.getAttribute('href'));
+// DOM checks run on content we control, since live sites change under us
+await page.setContent('<h1> Hello </h1><a href="/next">next</a>');
+console.log('✓ h1:', (await page.textContent('h1')).trim());
+console.log('✓ link href:', await page.locator('a').first().getAttribute('href'));
 
 await page.setContent('<button id=b>hi</button><script>b.onclick=()=>document.title="clicked"</script>');
 await page.click('#b');
 console.log('✓ clicked; title now:', await page.title());
 
-console.log('\nALL M0 CHECKS PASSED');
+console.log('\nALL CHECKS PASSED');
 // NB: never call browser.close() against a real user's Chrome
 process.exit(0);

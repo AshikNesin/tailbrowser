@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>tailbrowser</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Let AI agents drive your real Chrome over your Tailscale network. A Chrome extension and a small relay; nothing exposed to the internet.">
+<link rel="icon" href="assets/icon-32.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* layout: one narrow column; the video is the hero, everything else is quiet text.
+     palette: the product's own (icon, popup, video), dark-first like the video */
+  :root {
+    --bg: #161515;
+    --surface: #1f1e1e;
+    --line: #2e2d2d;
+    --fg: #f9f7f6;
+    --muted: #a8a5a3;
+    --faint: #706e6d;
+    --accent: #d0766c;
+    --dot: rgba(249, 247, 246, .05);
+    --sans: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f9f7f6; --surface: #ffffff; --line: #e8e4e1; --fg: #1f1e1e;
+      --muted: #5e5c5b; --faint: #8a8786; --accent: #b8554c; --dot: rgba(31, 30, 30, .06);
+      color-scheme: light;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f9f7f6; --surface: #ffffff; --line: #e8e4e1; --fg: #1f1e1e;
+    --muted: #5e5c5b; --faint: #8a8786; --accent: #b8554c; --dot: rgba(31, 30, 30, .06);
+    color-scheme: light;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 17px/1.6 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 980px;
+    margin: 0 auto;
+    padding-left: max(20px, env(safe-area-inset-left, 0px));
+    padding-right: max(20px, env(safe-area-inset-right, 0px));
+  }
+  a { color: inherit; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+  code, pre { font-family: var(--mono); }
+  h1, h2 { text-wrap: balance; letter-spacing: -.025em; margin: 0; }
+  p { margin: 0; }
+
+  /* ---------- top bar ---------- */
+  .top { display: flex; align-items: center; justify-content: space-between; padding-block: 22px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; letter-spacing: -.015em; text-decoration: none; }
+  .brand img { width: 28px; height: 28px; display: block; }
+  .top nav { display: flex; gap: 22px; font-size: 15px; color: var(--muted); }
+  .top nav a { text-decoration: none; }
+  .top nav a:hover { color: var(--fg); }
+
+  /* ---------- hero ---------- */
+  .hero {
+    padding-block: 64px 40px;
+    background: radial-gradient(circle, var(--dot) 1.2px, transparent 1.4px) 0 0 / 28px 28px;
+  }
+  .hero h1 { font-size: clamp(36px, 6vw, 60px); line-height: 1.05; font-weight: 700; max-width: 15ch; }
+  .hero .lede { margin-top: 22px; max-width: 58ch; font-size: 19px; color: var(--muted); }
+  .cta { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 32px; }
+  .cmd {
+    display: inline-flex; align-items: center; gap: 14px; min-width: 0;
+    padding: 12px 12px 12px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+    font: 15px/1.2 var(--mono);
+  }
+  .cmd .prompt { color: var(--faint); }
+  .copy {
+    border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--muted);
+    padding: 5px 10px; font: 500 13px var(--sans); cursor: pointer;
+  }
+  .copy:hover { color: var(--fg); }
+  .ghost { font-size: 15px; font-weight: 600; color: var(--muted); text-decoration: none; }
+  .ghost:hover { color: var(--fg); }
+
+  .film { margin-top: 44px; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: #161515; aspect-ratio: 16 / 9; max-width: 100%; }
+  .film video { display: block; width: 100%; height: 100%; }
+
+  /* ---------- sections ---------- */
+  section { padding-block: 56px; border-top: 1px solid var(--line); }
+  .label { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+  .tail { display: inline-flex; align-items: center; gap: 3px; } /* the icon's tail dots */
+  .tail i { display: block; border-radius: 50%; background: var(--accent); }
+  .tail i:nth-child(1) { width: 4px; height: 4px; opacity: .45; }
+  .tail i:nth-child(2) { width: 5px; height: 5px; opacity: .7; }
+  .tail i:nth-child(3) { width: 7px; height: 7px; }
+  section h2 { margin-top: 14px; font-size: clamp(26px, 3.6vw, 34px); line-height: 1.2; font-weight: 700; max-width: 26ch; }
+
+  .steps { list-style: none; margin: 34px 0 0; padding: 0; display: grid; gap: 28px; counter-reset: step; }
+  .steps li { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 4px 16px; counter-increment: step; }
+  .steps li::before {
+    content: counter(step); grid-column: 1; grid-row: 1 / span 2; width: 30px; height: 30px; border-radius: 50%;
+    display: grid; place-items: center; border: 1px solid var(--line); color: var(--muted); font: 600 14px var(--sans);
+  }
+  .steps li > * { grid-column: 2; min-width: 0; } /* everything but the number sits in the text column */
+  .steps h3 { margin: 2px 0 0; font-size: 18px; font-weight: 600; }
+  .steps p { color: var(--muted); max-width: 62ch; }
+  pre {
+    margin: 12px 0 0; padding: 14px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+    font-size: 14px; line-height: 1.65; overflow-x: auto; color: var(--fg);
+  }
+  pre .c { color: var(--faint); }
+  p code { font-size: .88em; padding: 1px 6px; border-radius: 6px; background: var(--surface); border: 1px solid var(--line); }
+
+  .modes { margin-top: 34px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; }
+  .modes h3 { margin: 0 0 6px; font-size: 18px; font-weight: 600; }
+  .modes p { color: var(--muted); font-size: 16px; }
+  .note { margin-top: 26px; color: var(--muted); font-size: 16px; max-width: 64ch; }
+
+  .facts { list-style: none; margin: 30px 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 40px; }
+  .facts b { display: block; font-weight: 600; }
+  .facts span { color: var(--muted); font-size: 16px; }
+
+  footer { border-top: 1px solid var(--line); padding-block: 30px 44px; color: var(--faint); font-size: 14px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
+  footer a { color: var(--muted); }
+
+  @media (max-width: 720px) {
+    .hero { padding-block: 40px 28px; }
+    .modes, .facts { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+    .top nav a.hide-sm { display: none; }
+    .cmd { width: 100%; justify-content: space-between; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="#"><img src="assets/icon.svg" alt="">tailbrowser</a>
+    <nav>
+      <a class="hide-sm" href="#how">How it works</a>
+      <a class="hide-sm" href="#scope">Scope</a>
+      <a href="https://github.com/AshikNesin/tailbrowser">GitHub</a>
+    </nav>
+  </header>
+</div>
+
+<div class="hero">
+  <div class="wrap">
+    <h1>Let AI agents drive your real Chrome, over your tailnet.</h1>
+    <p class="lede">A Chrome extension and a small relay. Your agent gets real Playwright on the browser you are already signed in to. Nothing is exposed to the internet.</p>
+    <div class="cta">
+      <div class="cmd"><span><span class="prompt">$ </span><span id="cmd">npx tailbrowser relay</span></span><button class="copy" id="copy" type="button">Copy</button></div>
+      <a class="ghost" href="https://github.com/AshikNesin/tailbrowser">View on GitHub →</a>
+    </div>
+    <div class="film">
+      <video id="film" poster="assets/tailbrowser-poster.jpg" controls muted loop playsinline preload="metadata" aria-label="tailbrowser product video, 48 seconds">
+        <source src="assets/tailbrowser.webm" type="video/webm">
+        <source src="assets/tailbrowser.mp4" type="video/mp4">
+      </video>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <section id="how">
+    <div class="label"><span class="tail"><i></i><i></i><i></i></span>How it works</div>
+    <h2>Three steps, and your agent has a browser.</h2>
+    <ol class="steps">
+      <li>
+        <h3>Start the relay</h3>
+        <p>Run it once, on any machine in your tailnet. It binds to the Tailscale IP and prints what to paste where.</p>
+        <pre><span class="c">$</span> npx tailbrowser relay</pre>
+      </li>
+      <li>
+        <h3>Load the extension</h3>
+        <p>On the Chrome machine, load <code>extension/</code> unpacked, click <b>Find local relay</b> or paste <code>ws://mac-mini:8787</code>, and share a tab.</p>
+      </li>
+      <li>
+        <h3>Run a snippet</h3>
+        <p>From any tailnet machine. The relay is found automatically and the session stays with you.</p>
+<pre><span class="c">$</span> npx tailbrowser -e 'await page.goto("https://example.com"); return await page.title()'
+<span class="c">"Example Domain"</span></pre>
+        <p style="margin-top:14px">Or give it to Claude Code, Cursor, or any MCP client:</p>
+<pre>{ "mcpServers": { "tailbrowser": { "command": "npx", "args": ["-y", "tailbrowser@latest", "--mcp"] } } }</pre>
+      </li>
+    </ol>
+  </section>
+
+  <section id="scope">
+    <div class="label"><span class="tail"><i></i><i></i><i></i></span>Scope</div>
+    <h2>You choose what agents can see.</h2>
+    <div class="modes">
+      <div><h3>Tabs I pick</h3><p>Only the tabs you share from the popup. The default.</p></div>
+      <div><h3>Allowlist</h3><p>Tabs whose URL matches your patterns, attached as you browse.</p></div>
+      <div><h3>Entire browser</h3><p>Every tab, plus opening and closing tabs.</p></div>
+    </div>
+    <p class="note">Tabs outside the scope do not exist for the agent. Asking for one returns a <code>TB_SCOPE</code> error. Narrow the scope and tabs detach at once.</p>
+  </section>
+
+  <section>
+    <div class="label"><span class="tail"><i></i><i></i><i></i></span>Security</div>
+    <h2>Private by design.</h2>
+    <ul class="facts">
+      <li><b>Tailnet only</b><span>The relay binds to your Tailscale IP. Nothing off the tailnet can connect.</span></li>
+      <li><b>Optional token</b><span>Tokenless on a personal tailnet; add <code>--token</code> when you share one.</span></li>
+      <li><b>Always visible</b><span>Chrome shows its debugging banner on every shared tab. Dismiss it to unshare.</span></li>
+      <li><b>One-click revoke</b><span>Drops the relay link and every attachment, and stays off after a restart.</span></li>
+    </ul>
+  </section>
+
+  <footer>
+    <span>tailbrowser · MIT license</span>
+    <span>Built on <a href="https://playwright.dev">Playwright</a>. Relay design follows <a href="https://github.com/remorses/playwriter">Playwriter</a>.</span>
+  </footer>
+</div>
+
+<script>
+  const copy = document.getElementById('copy');
+  copy.addEventListener('click', async () => {
+    const text = document.getElementById('cmd').textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      copy.textContent = 'Copied';
+    } catch {
+      const range = document.createRange();
+      range.selectNodeContents(document.getElementById('cmd'));
+      const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
+      copy.textContent = 'Selected';
+    }
+    setTimeout(() => { copy.textContent = 'Copy'; }, 1600);
+  });
+  // play the (silent) video inline unless the viewer prefers reduced motion
+  const film = document.getElementById('film');
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) film.play().catch(() => {});
+</script>
+</body>
+</html>
