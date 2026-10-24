@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>tailbrowser social preview</title>
+<!-- Repository social preview (1280x640, light). Render: npm run build:og -->
+<style>
+  :root {
+    --bg: #f9f7f6; --ink: #1f1e1e; --muted: #706e6d; --line: #e6e2df; --accent: #b8554c;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1280px; height: 640px; overflow: hidden; }
+  body {
+    font-family: Inter, system-ui, sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased;
+    background: radial-gradient(circle, rgba(31,30,30,.07) 1.3px, transparent 1.5px) 0 0 / 26px 26px, var(--bg);
+    display: flex; align-items: center; gap: 56px; padding: 0 0 0 84px;
+  }
+  .text { flex: 0 0 470px; }
+  .brand { display: flex; align-items: center; gap: 18px; }
+  .brand img { width: 84px; height: 84px; display: block; }
+  .brand span { font-size: 58px; font-weight: 700; letter-spacing: -.035em; }
+  h1 { margin-top: 34px; font-size: 40px; line-height: 1.16; font-weight: 700; letter-spacing: -.025em; }
+  p { margin-top: 20px; font-size: 22px; line-height: 1.45; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 30px; }
+  .chips span { font: 500 16px/1 "JetBrains Mono", ui-monospace, monospace; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: var(--ink); }
+  /* the browser card bleeds off the right edge */
+  .browser { position: relative; flex: none; width: 760px; border-radius: 18px; overflow: hidden; background: #fff;
+    border: 1px solid var(--line); box-shadow: 0 30px 70px rgba(31,30,30,.16), 0 4px 14px rgba(31,30,30,.06); }
+  .bar { height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 16px; background: #efecea; border-bottom: 1px solid var(--line); }
+  .dot { width: 11px; height: 11px; border-radius: 50%; background: #d6d1ce; }
+  .url { margin-left: 12px; flex: 1; height: 26px; border-radius: 13px; background: #fff; display: flex; align-items: center; padding: 0 14px; font-size: 14px; color: var(--muted); }
+  .info { height: 34px; display: flex; align-items: center; padding: 0 16px; font-size: 13px; color: #444342; background: #f7f5f4; border-bottom: 1px solid var(--line); }
+  .page { position: relative; height: 451px; overflow: hidden; }
+  .page img { display: block; width: 760px; }
+  .cursor { position: absolute; left: 352px; top: 104px; }
+  .agent { position: absolute; left: 34px; top: 40px; font: 700 13px/1 Inter, sans-serif; color: #f9f7f6; background: var(--accent); padding: 5px 10px; border-radius: 999px; }
+</style>
+</head>
+<body>
+  <div class="text">
+    <div class="brand"><img src="../../extension/icons/icon.svg" alt=""><span>tailbrowser</span></div>
+    <h1>Let AI agents drive your real Chrome, over your tailnet.</h1>
+    <p>A Chrome extension and a small relay. Nothing exposed to the internet.</p>
+    <div class="chips"><span>Playwright</span><span>MCP</span><span>CLI</span><span>Tailscale</span></div>
+  </div>
+  <div class="browser">
+    <div class="bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><div class="url">ops.acme.test/orders</div></div>
+    <div class="info">“tailbrowser” started debugging this browser</div>
+    <div class="page">
+      <img src="../video/assets/demo-3-result.png" alt="">
+      <div class="cursor">
+        <svg width="40" height="50" viewBox="56 48 46 64"><path d="M58 50v50l12.5-11.5 9.5 19.5 10.5-5-9.5-19H99z" fill="#b8554c" stroke="#f9f7f6" stroke-width="5" stroke-linejoin="round" paint-order="stroke"/></svg>
+        <span class="agent">agent</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
