@@ -17,7 +17,8 @@ export function loadRelayConfig(argv, env = process.env) {
   const flag = flagReader(argv);
 
   const port = Number(requireValue('port', flag('port', DEFAULT_PORT)));
-  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error(`invalid --port: ${flag('port')}`);
+  // 0 would make the OS pick a port the relay's own sandbox connection doesn't know
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`invalid --port: ${flag('port')}`);
 
   const token = flag('token', env.TAILBROWSER_TOKEN || '');
   if (token === true) throw new Error('--token requires a value (or omit --token for tokenless tailnet-only mode)');
@@ -53,12 +54,15 @@ export function selfHost(bind) {
 // ---------- source-IP allowlist ----------
 
 const ipToLong = (ip) => ip.split('.').reduce((acc, octet) => ((acc << 8) + Number(octet)) >>> 0, 0);
+const ALLOW_ENTRY = /^(\d{1,3}(?:\.\d{1,3}){3})(?:\/(\d{1,2}))?$/;
 
-// "100.1.2.3" or "100.64.0.0/10" -> { base, mask }
+// "100.1.2.3" or "100.64.0.0/10" -> { base, mask }. Strict on purpose: a sloppy
+// entry like "100.64.0.0/" must fail, not turn into /0 and allow everyone.
 function parseAllowEntry(entry) {
-  const [base, bitsRaw] = entry.split('/');
-  const bits = bitsRaw === undefined ? 32 : Number(bitsRaw);
-  if (!IPV4.test(base) || !Number.isInteger(bits) || bits < 0 || bits > 32) {
+  const m = ALLOW_ENTRY.exec(entry);
+  const base = m?.[1];
+  const bits = m?.[2] === undefined ? 32 : Number(m[2]);
+  if (!m || base.split('.').some((octet) => Number(octet) > 255) || bits > 32) {
     throw new Error(`invalid --allow entry "${entry}" (expected IPv4 or CIDR, e.g. 100.64.0.0/10)`);
   }
   const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;

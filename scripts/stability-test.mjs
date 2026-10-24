@@ -8,6 +8,7 @@
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,6 +67,22 @@ console.log('▸ 1. malformed inputs never kill the relay');
     try { await fetch(`${BASE}${p}`, { method: m, body: b || undefined }); } catch {}
   }
   (await health())?.ok ? ok('malformed/empty bodies isolated') : bad('malformed body killed the relay');
+
+  // an oversized body gets a real 413 answer, not a connection reset
+  let status = null;
+  try { status = (await fetch(`${BASE}/execute`, { method: 'POST', body: 'x'.repeat(6 * 1024 * 1024) })).status; } catch (e) { status = String(e.cause?.code || e); }
+  status === 413 ? ok('oversized body → 413') : bad(`oversized body: expected 413, got ${status}`);
+
+  // a request target the URL parser rejects gets a 400, not a hung request
+  const raw = await new Promise((resolve) => {
+    const sock = net.connect(PORT, '127.0.0.1', () => sock.write('GET http://[bad HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'));
+    let buf = '';
+    sock.on('data', (d) => { buf += d; });
+    sock.on('close', () => resolve(buf));
+    sock.on('error', () => resolve(buf));
+    setTimeout(() => { sock.destroy(); resolve(buf); }, 3000);
+  });
+  /^HTTP\/1\.1 400/.test(raw) ? ok('malformed request target → 400') : bad(`malformed target: ${raw.split('\r\n')[0] || 'no answer'}`);
 }
 
 console.log('▸ 2. execute without extension → typed fast error');
@@ -180,12 +197,42 @@ console.log('▸ 7c. MCP server: JSON-RPC edge cases');
   rpc({ id: 1, method: 'tools/call', params: { name: 'nope', arguments: {} } });
   rpc({ id: 2, method: 'tools/call', params: { name: 'execute', arguments: { code: 'return 6 * 7', sessionId: 'mcp' } } });
   rpc({ id: 3, method: 'no/such/method' });
-  for (let i = 0; i < 60 && replies.size < 4; i++) await wait(250);
+  mcp.stdin.write('null\n'); // valid JSON, not a request: must not crash the server
+  rpc({ id: 4, method: 'ping' });
+  for (let i = 0; i < 60 && replies.size < 6; i++) await wait(250);
   replies.get(0)?.result?.serverInfo?.name === 'tailbrowser' ? ok('answers request id 0') : bad(`id 0 unanswered: ${JSON.stringify(replies.get(0))}`);
   replies.get(1)?.error?.code === -32602 ? ok('unknown tool → invalid params') : bad(`unknown tool: ${JSON.stringify(replies.get(1))}`);
   /\[result\] 42/.test(replies.get(2)?.result?.content?.[0]?.text || '') ? ok('execute tool round-trips') : bad(`execute via MCP: ${JSON.stringify(replies.get(2))}`);
   replies.get(3)?.error?.code === -32601 ? ok('unknown method → method not found') : bad(`unknown method: ${JSON.stringify(replies.get(3))}`);
+  replies.get(null)?.error?.code === -32600 && replies.get(4)?.result
+    ? ok('non-object message → invalid request, server keeps running') : bad(`null message: ${JSON.stringify(replies.get(null))} / ping: ${JSON.stringify(replies.get(4))}`);
   mcp.kill();
+}
+
+console.log('▸ 7d. CDP: setAutoAttach {autoAttach:false} attaches nothing');
+{
+  const code = `
+    const WebSocket = (await import('ws')).default;
+    const ws = new WebSocket('ws://127.0.0.1:${PORT}/cdp/autoattach');
+    await new Promise((r) => ws.on('open', r));
+    let attached = 0;
+    ws.on('message', (d) => { if (JSON.parse(String(d)).method === 'Target.attachedToTarget') attached++; });
+    const send = (id, method, params) => ws.send(JSON.stringify({ id, method, params }));
+    send(1, 'Target.setAutoAttach', { autoAttach: false, flatten: true });
+    await new Promise((r) => setTimeout(r, 500));
+    const off = attached;
+    send(2, 'Target.setAutoAttach', { autoAttach: true, flatten: true });
+    await new Promise((r) => setTimeout(r, 500));
+    console.log(JSON.stringify({ off, on: attached }));
+    process.exit(0);
+  `;
+  const p = spawn('node', ['--input-type=module', '-e', code], { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] });
+  procs.push(p);
+  let out = '';
+  p.stdout.on('data', (d) => { out += d; });
+  await new Promise((r) => p.on('exit', r));
+  const r = JSON.parse(out.trim() || '{}');
+  r.off === 0 && r.on > 0 ? ok(`autoAttach:false attaches nothing; true attaches (${r.on})`) : bad(`setAutoAttach: ${out.trim()}`);
 }
 
 console.log('▸ 8. second relay on same port → friendly EADDRINUSE');
@@ -200,6 +247,23 @@ console.log('▸ 8. second relay on same port → friendly EADDRINUSE');
     p.on('exit', (c) => { clearTimeout(t); r({ out: buf, code: c }); });
   });
   /already in use/.test(out) && code === 1 ? ok('friendly EADDRINUSE') : bad(`EADDRINUSE not friendly (exit=${code}): ${out.slice(0, 120)}`);
+}
+
+console.log('▸ 8b. invalid relay config is refused at startup');
+{
+  const start = (args) => new Promise((resolve) => {
+    const p = spawn('node', ['relay/relay.mjs', '--bind', '127.0.0.1', ...args], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+    procs.push(p);
+    let out = '';
+    p.stdout.on('data', (d) => { out += d; });
+    p.stderr.on('data', (d) => { out += d; });
+    const t = setTimeout(() => { p.kill(); resolve({ code: 'still running', out }); }, 4000);
+    p.on('exit', (code) => { clearTimeout(t); resolve({ code, out }); });
+  });
+  for (const args of [['--port', String(PORT + 2), '--allow', '100.64.0.0/'], ['--port', String(PORT + 2), '--allow', '100.64.256.0/24'], ['--port', '0']]) {
+    const r = await start(args);
+    r.code === 1 && /invalid --(allow|port)/.test(r.out) ? ok(`refused: ${args.slice(-2).join(' ')}`) : bad(`accepted ${args.join(' ')} (exit=${r.code}): ${r.out.slice(0, 120)}`);
+  }
 }
 
 console.log('▸ 9. relay still alive at the end');

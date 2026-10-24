@@ -35,6 +35,10 @@ const { port, bind, token, allowList } = config;
 if (config.bindSource === 'tailscale') console.log('[relay] auto-detected tailscale IP:', bind);
 if (config.bindSource === 'loopback') console.log('[relay] no tailscale IP found, binding loopback. Pass --bind <ip> or install the tailscale CLI.');
 if (!token) console.log('[relay] tokenless mode: tailnet membership is the only gate (fine for a personal tailnet)');
+const beyondTailnet = config.bindSource === 'flag' && !/^(127\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(bind);
+if (beyondTailnet && !token && !allowList.length) {
+  console.log(`[relay] WARNING: bound to ${bind} with no --token and no --allow; devices outside your tailnet may be able to connect`);
+}
 
 // ---------- process-level safety net ----------
 // The relay is a daemon: a surprise exception must never take it down. Log
