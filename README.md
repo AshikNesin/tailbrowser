@@ -100,7 +100,8 @@ tailbrowser scope | health
 
 tailbrowser has these security controls:
 
-- The relay binds only to the Tailscale interface. Devices outside the tailnet cannot connect.
+- By default, the relay binds only to the Tailscale IP address of the computer. Devices outside the tailnet cannot connect. If the computer has no Tailscale IP address, the relay binds to `127.0.0.1`.
+- `--bind` sets a different address. If you use `--bind 0.0.0.0` or a LAN address, devices outside your tailnet can connect. In this case, always use `--token` or `--allow`.
 - By default, the relay does not use a token. Membership in your tailnet (WireGuard) is the authentication. If other users share your tailnet, use `--token`.
 - To limit the source IP addresses that can connect, use `--allow`. For example: `--allow 100.101.102.103,100.64.0.0/10`.
 - The extension controls the scope. There are three scope modes:
@@ -108,8 +109,8 @@ tailbrowser has these security controls:
   - **Allowlist**: The agents can use the tabs whose URL matches a glob pattern. When a tab goes to a matching URL, the extension attaches it automatically.
   - **Entire browser**: The agents can use all tabs. They can also open and close tabs.
 - The agents cannot see tabs that are outside the scope. When you make the scope smaller, the extension detaches those tabs immediately.
-- Chrome always shows a "debugging" banner on a tab that an agent controls. If you close the banner or click **Stop** in the popup, the extension stops sharing that tab. No scope mode attaches that tab again automatically.
-- **Disconnect agent** closes the relay connection and detaches all tabs. The extension stays disconnected after a browser restart. To connect again, click **Reconnect agent**.
+- Chrome always shows a "debugging" banner on a tab that an agent controls. If you close the banner or click **Stop** in the popup, the extension stops sharing that tab. No scope mode attaches that tab again until the browser restarts. To share it again before that, turn on **This tab** in the popup.
+- **Revoke agent access** closes the relay connection and detaches all tabs. The extension stays disconnected after a browser restart. To connect again, click **Reconnect agent**.
 - An agent can create a tab with `newPage()` only in **Entire browser** mode. In the other modes, the relay returns a `TB_SCOPE` error.
 
 ## Development
